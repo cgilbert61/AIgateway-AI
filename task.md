@@ -1,7 +1,7 @@
-- [ ] Update PostgreSQL schema with quarantine status and SIEM configuration table
-- [ ] Add G1163RT Quarantine database helper functions in `gateway/db.go`
-- [ ] Integrate quarantine check and HTTP 403 response in `handleChatCompletions` and `handleAgentAction`
-- [ ] Add API endpoints for SIEM config (`/api/siem/config`), Quarantine list (`/api/quarantine/list`), and Quarantine actions (`/api/quarantine/action`)
-- [ ] Design and build G1163RT Quarantine Workspace UI and SIEM Integrations menu in `gateway/dashboard/index.html` and `gateway/dashboard/config.html`
-- [ ] Add manual verification tests in `test_gateway.py` to assert quarantine block and release behaviors
-- [ ] Rebuild and restart Docker Compose containers, then run tests to verify everything is green
+- [x] Update PostgreSQL schema with quarantine status and SIEM configuration table
+- [x] Add G1163RT Quarantine database helper functions in `gateway/db.go`
+- [x] Integrate quarantine check and HTTP 403 response in `handleChatCompletions` and `handleAgentAction`
+- [x] Add API endpoints for SIEM config (`/api/siem/config`), Quarantine list (`/api/quarantine/list`), and Quarantine actions (`/api/quarantine/action`)
+- [x] Design and build G1163RT Quarantine Workspace UI and SIEM Integrations menu in `gateway/dashboard/index.html` and `gateway/dashboard/config.html`
+- [x] Add manual verification tests in `test_gateway.py` to assert quarantine block and release behaviors
+- [x] Rebuild and restart Docker Compose containers, then run tests to verify everything is green
