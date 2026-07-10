@@ -512,6 +512,98 @@
             display: block;
         }
 
+        /* XAI Diagnostics Panel */
+        .xai-panel-grid {
+            display: grid;
+            grid-template-columns: 1.2fr 1fr 1fr;
+            gap: 16px;
+            height: 100%;
+            overflow: hidden;
+        }
+
+        .xai-card {
+            background: rgba(30, 41, 59, 0.15);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 6px;
+            padding: 12px;
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+        }
+
+        .xai-card-title {
+            font-size: 10px;
+            color: var(--color-cyan);
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            padding-bottom: 6px;
+        }
+
+        .xai-explain-text {
+            font-size: 11px;
+            line-height: 1.6;
+            color: #cbd5e1;
+            overflow-y: auto;
+            flex: 1;
+            padding-right: 4px;
+        }
+
+        .xai-explain-text code {
+            font-family: monospace;
+            background: rgba(255,255,255,0.05);
+            padding: 2px 4px;
+            border-radius: 3px;
+            color: #22d3ee;
+        }
+
+        .xai-breakdown-item {
+            margin-bottom: 10px;
+        }
+
+        .xai-breakdown-meta {
+            display: flex;
+            justify-content: space-between;
+            font-size: 9.5px;
+            color: var(--text-muted);
+            margin-bottom: 4px;
+        }
+
+        .xai-breakdown-bar-bg {
+            background: rgba(255, 255, 255, 0.05);
+            height: 6px;
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .xai-breakdown-bar-fill {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.4s ease;
+        }
+
+        .xai-rule-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 6px 8px;
+            border-radius: 4px;
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.04);
+            margin-bottom: 6px;
+            font-size: 10.5px;
+        }
+
+        .xai-rule-badge {
+            font-size: 9px;
+            font-weight: 700;
+            padding: 2px 6px;
+            border-radius: 3px;
+            text-transform: uppercase;
+        }
+
         /* Matrices View Layout */
         .matrices-grid {
             display: grid;
@@ -923,6 +1015,7 @@
                 <div class="tab-headers">
                     <button class="tab-btn active" id="tab-btn-matrices" onclick="switchTab('matrices')">Active Inference Matrices</button>
                     <button class="tab-btn" id="tab-btn-cso" onclick="switchTab('cso')">CSO Translation Forensics</button>
+                    <button class="tab-btn" id="tab-btn-xai" onclick="switchTab('xai')">XAI Diagnostics</button>
                     <button class="tab-btn" id="tab-btn-health" onclick="switchTab('health')">System Backend Health</button>
                     <button class="tab-btn" id="tab-btn-forensics" onclick="switchTab('forensics')">Agent Forensics</button>
                 </div>
@@ -1015,6 +1108,33 @@
                                     <span id="cso-trans-header-title">Translated Request (Gateway -> Upstream)</span>
                                 </div>
                                 <div class="cso-box-body" id="cso-trans-req" style="color: #67e8f9;">Select a transaction in the right log...</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab 3: XAI Diagnostics -->
+                <div class="tab-content-panel" id="tab-content-xai">
+                    <div class="xai-panel-grid">
+                        <!-- Left Column: Plain English Explanation Card -->
+                        <div class="xai-card">
+                            <div class="xai-card-title">🤖 Natural Language Cognitive Assessment</div>
+                            <div class="xai-explain-text" id="xai-explanation">Select a session or transaction to generate explanation...</div>
+                        </div>
+                        
+                        <!-- Middle Column: Observation Breakdown -->
+                        <div class="xai-card">
+                            <div class="xai-card-title">📊 Sensory Surprise Attribution Breakdown</div>
+                            <div style="flex:1; display:flex; flex-direction:column; justify-content:center;" id="xai-breakdown">
+                                <!-- Populated by JS -->
+                            </div>
+                        </div>
+                        
+                        <!-- Right Column: Tuned Rules (Modulation) -->
+                        <div class="xai-card">
+                            <div class="xai-card-title">⚙️ Top-Down Modulated Policy Rules</div>
+                            <div style="flex:1; display:flex; flex-direction:column; justify-content:center;" id="xai-rules">
+                                <!-- Populated by JS -->
                             </div>
                         </div>
                     </div>
@@ -1339,6 +1459,7 @@
                 drawBeliefsChart(state.history_beliefs);
                 updateMatrices(state);
                 renderCsoForensics();
+                updateXAIPanel(state);
 
                 // Update theta slider
                 if (state.threshold_theta && !isDraggingTheta) {
@@ -2415,6 +2536,162 @@
                 }
             }
             container.innerHTML = html;
+        }
+
+        function updateXAIPanel(state) {
+            const explanationEl = document.getElementById("xai-explanation");
+            const breakdownEl = document.getElementById("xai-breakdown");
+            const rulesEl = document.getElementById("xai-rules");
+            if (!explanationEl || !breakdownEl || !rulesEl) return;
+
+            // 1. Parse active inference metrics
+            const sessionName = activeSessionId || "None";
+            const l2Beliefs = state.l2_beliefs || [1.0, 0.0, 0.0];
+            const leakyVfe = state.leaky_vfe !== undefined ? state.leaky_vfe : 0.0;
+            const theta = state.threshold_theta !== undefined ? state.threshold_theta : 3.50;
+            const currentObs = state.current_obs !== undefined ? state.current_obs : 0;
+            const currentAction = state.current_action !== undefined ? state.current_action : 0;
+
+            const stateNames = ["Safe", "Suspicious", "Malicious"];
+            const obsNames = ["Read", "StructureShift", "InputError", "IngressFlood"];
+            const actionNames = ["ALLOW", "MONITOR", "BLOCK"];
+
+            // Find argmax belief state
+            let maxBeliefIdx = 0;
+            let maxBeliefVal = -1.0;
+            l2Beliefs.forEach((b, idx) => {
+                if (b > maxBeliefVal) {
+                    maxBeliefVal = b;
+                    maxBeliefIdx = idx;
+                }
+            });
+
+            const currentBeliefStateName = stateNames[maxBeliefIdx];
+            const beliefPct = (maxBeliefVal * 100).toFixed(0);
+
+            // 2. Generate Natural Language Explanation
+            let explanationHTML = "";
+            
+            // Core assessment summary
+            explanationHTML += `This session (<code>${sessionName.substring(0,12)}...</code>) is currently assessed as <strong style="color: ${maxBeliefIdx === 0 ? 'var(--color-allow)' : maxBeliefIdx === 1 ? 'var(--color-warn)' : 'var(--color-block)'}">${currentBeliefStateName}</strong> with a belief confidence of <strong>${beliefPct}%</strong>.<br><br>`;
+            
+            // Explaining the VFE surprise and threshold
+            explanationHTML += `The current accumulated surprise level (Variational Free Energy) is <strong style="font-family: monospace; color: var(--color-magenta);">${leakyVfe.toFixed(4)}</strong>. `;
+            if (theta < 4.95) {
+                explanationHTML += `This is compared against the active threshold barrier of <strong style="font-family: monospace; color: var(--color-cyan);">${theta.toFixed(2)}</strong>. `;
+                if (leakyVfe > theta) {
+                    explanationHTML += `Because the surprise level has crossed this barrier, the gateway has entered a <strong style="color: var(--color-block)">FAIL-CLOSED</strong> lockdown state for this session.`;
+                } else if (leakyVfe > theta * 0.7) {
+                    explanationHTML += `Surprise levels are elevated near the threshold, prompting top-down rule stricter modulation.`;
+                } else {
+                    explanationHTML += `The surprise level is well below the containment barrier, allowing normal packet processing.`;
+                }
+            } else {
+                explanationHTML += `The blocking threshold is currently set to <strong>Audit Mode</strong>, meaning no active inference blocks are enforced.`;
+            }
+            explanationHTML += `<br><br>`;
+
+            // Explaining the latest sensor observations
+            explanationHTML += `The latest observed transaction state was classified as <strong>${obsNames[currentObs]}</strong>. `;
+            if (currentObs === 0) {
+                explanationHTML += `This indicates standard payload reading with no anomalous syntactic or rate features detected.`;
+            } else if (currentObs === 1) {
+                explanationHTML += `This indicates a <strong>Syntactic Structure Shift</strong> anomaly (VFE anomaly in the request payload).`;
+            } else if (currentObs === 2) {
+                explanationHTML += `This indicates a security policy breach (e.g. <strong>PII leakage</strong> or <strong>Prompt Injection</strong> block).`;
+            } else if (currentObs === 3) {
+                explanationHTML += `This indicates an <strong>Ingress Request Flood</strong> rate limit violation.`;
+            }
+
+            explanationEl.innerHTML = explanationHTML;
+
+            // 3. Generate Sensory Surprise Attribution Breakdown
+            // Calculate heuristic percentages based on CurrentObs
+            let syntaxPct = 0;
+            let piiPct = 0;
+            let ratePct = 0;
+            let structPct = 0;
+
+            if (currentObs === 0) {
+                syntaxPct = 100;
+            } else if (currentObs === 1) {
+                syntaxPct = 30;
+                structPct = 70;
+            } else if (currentObs === 2) {
+                syntaxPct = 15;
+                piiPct = 85;
+            } else if (currentObs === 3) {
+                syntaxPct = 10;
+                ratePct = 90;
+            }
+
+            const breakdownItems = [
+                { name: "Syntax Scanner Transitions", val: syntaxPct, color: "#06b6d4" },
+                { name: "Structural Anomaly Scanner", val: structPct, color: "#d946ef" },
+                { name: "PII / Prompt Injection Scanner", val: piiPct, color: "#f59e0b" },
+                { name: "Ingress Request Flood Monitor", val: ratePct, color: "#ef4444" }
+            ];
+
+            let breakdownHTML = "";
+            breakdownItems.forEach(item => {
+                if (item.val === 0) return;
+                breakdownHTML += `
+                    <div class="xai-breakdown-item">
+                        <div class="xai-breakdown-meta">
+                            <span>${item.name}</span>
+                            <span style="font-weight: 700; color: ${item.color};">${item.val}%</span>
+                        </div>
+                        <div class="xai-breakdown-bar-bg">
+                            <div class="xai-breakdown-bar-fill" style="width: ${item.val}%; background: ${item.color};"></div>
+                        </div>
+                    </div>
+                `;
+            });
+            breakdownEl.innerHTML = breakdownHTML;
+
+            // 4. Generate Top-Down Modulated Policy Rules (Tuned Rules)
+            let rulesHTML = "";
+            let opaStatus = "ACTIVE";
+            let opaColor = "var(--color-allow)";
+            let limitDesc = "Capacity: 15 req / 2s";
+            let piiDesc = "Redaction active";
+
+            if (maxBeliefIdx === 1) { // Suspicious
+                opaStatus = "MONITORED";
+                opaColor = "var(--color-warn)";
+                limitDesc = "Capacity: Restricted (5 req / 2s)";
+                piiDesc = "Strict redaction active";
+            } else if (maxBeliefIdx === 2 || leakyVfe > theta) { // Malicious / Blocked
+                opaStatus = "LOCKED";
+                opaColor = "var(--color-block)";
+                limitDesc = "Capacity: 0 (LOCKDOWN)";
+                piiDesc = "Gateway blocked";
+            }
+
+            rulesHTML += `
+                <div class="xai-rule-item">
+                    <div>
+                        <div style="font-weight:700;">OPA Access Policy</div>
+                        <div style="font-size:9.5px; color:var(--text-muted);">Admin check enabled</div>
+                    </div>
+                    <span class="xai-rule-badge" style="background: rgba(6, 182, 212, 0.15); color: var(--color-cyan);">${opaStatus}</span>
+                </div>
+                <div class="xai-rule-item">
+                    <div>
+                        <div style="font-weight:700;">Ingress Rate Limit</div>
+                        <div style="font-size:9.5px; color:var(--text-muted);">${limitDesc}</div>
+                    </div>
+                    <span class="xai-rule-badge" style="background: rgba(16, 185, 129, 0.15); color: var(--color-allow);">ENFORCED</span>
+                </div>
+                <div class="xai-rule-item">
+                    <div>
+                        <div style="font-weight:700;">PII Redaction Gate</div>
+                        <div style="font-size:9.5px; color:var(--text-muted);">${piiDesc}</div>
+                    </div>
+                    <span class="xai-rule-badge" style="background: rgba(245, 158, 11, 0.15); color: var(--color-warn);">DYNAMIC</span>
+                </div>
+            `;
+            rulesEl.innerHTML = rulesHTML;
         }
 
         function updateMatrices(state) {
