@@ -159,6 +159,7 @@ func main() {
 		mux1.HandleFunc("/api/quarantine/list", handleAPIQuarantineList)
 		mux1.HandleFunc("/api/quarantine/action", handleAPIQuarantineAction)
 		mux1.HandleFunc("/flow.html", handleFlowPage)
+		mux1.HandleFunc("/quarantine.html", handleQuarantinePage)
 		mux1.HandleFunc("/", handleDashboard)
 
 		log.Printf("Go Gateway API & Analytics Dashboard listening on 0.0.0.0:1173...")
@@ -185,6 +186,7 @@ func main() {
 	mux2.HandleFunc("/api/quarantine/list", handleAPIQuarantineList)
 	mux2.HandleFunc("/api/quarantine/action", handleAPIQuarantineAction)
 	mux2.HandleFunc("/flow.html", handleFlowPage)
+	mux2.HandleFunc("/quarantine.html", handleQuarantinePage)
 
 	log.Printf("Go Configuration Portal listening on 0.0.0.0:1163...")
 	if err := http.ListenAndServe(":1163", mux2); err != nil {
@@ -2585,6 +2587,26 @@ func handleFlowPage(w http.ResponseWriter, r *http.Request) {
 			path = "../dashboard/flow.html"
 			if _, err := os.Stat(path); os.IsNotExist(err) {
 				path = "gateway/dashboard/flow.html"
+			}
+		}
+	}
+	http.ServeFile(w, r, path)
+}
+
+func handleQuarantinePage(w http.ResponseWriter, r *http.Request) {
+	if setupCORSHeaders(w, r) {
+		return
+	}
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
+	path := "/app/dashboard/quarantine.html"
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		path = "./dashboard/quarantine.html"
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			path = "../dashboard/quarantine.html"
+			if _, err := os.Stat(path); os.IsNotExist(err) {
+				path = "gateway/dashboard/quarantine.html"
 			}
 		}
 	}
