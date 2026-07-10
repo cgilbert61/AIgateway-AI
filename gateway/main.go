@@ -1526,14 +1526,20 @@ func handleAPISystemStatus(w http.ResponseWriter, r *http.Request) {
 	var latencyMs int64
 	if GatewayConfig.BaseURL != "" {
 		start := time.Now()
-		client := &http.Client{Timeout: 800 * time.Millisecond}
-		resp, err := client.Get(GatewayConfig.BaseURL)
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		req, err := http.NewRequestWithContext(ctx, "GET", GatewayConfig.BaseURL, nil)
 		if err != nil {
 			upstreamStatus = "UNREACHABLE"
 		} else {
-			resp.Body.Close()
-			latencyMs = time.Since(start).Milliseconds()
+			resp, err := sharedClient.Do(req)
+			if err != nil {
+				upstreamStatus = "UNREACHABLE"
+			} else {
+				resp.Body.Close()
+				latencyMs = time.Since(start).Milliseconds()
+			}
 		}
+		cancel()
 	} else {
 		upstreamStatus = "NOT_CONFIGURED"
 	}
