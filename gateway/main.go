@@ -2486,6 +2486,8 @@ func handleAPIToggleAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	authorizedKeysCache.Store(req.KeyID, req.IsActive)
+
 	log.Printf("[Agent Registration] Toggled key '%s' to active=%v", req.KeyID, req.IsActive)
 
 	w.Header().Set("Content-Type", "application/json")
