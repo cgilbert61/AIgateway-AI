@@ -223,4 +223,15 @@ We completed a comprehensive load-testing round to address the simulation backup
 - **Transient Active Inference Sandbox**: If OPA simulation allows a payload, the simulator spins up a temporary, transient `ActiveInfState` instance in memory. It scans the payload tokens using L1 classifiers, updates L2 perception, selects actions using `SelectActionEFE`, and returns beliefs, VFE score, decided action, and plain English XAI explanations.
 - **Header Navigation Integration**: Added a prominent purple button `🛠️ OPA Playground` in [gateway/dashboard/index.html](file:///c:/Users/chuck/AIAIAI/gateway/dashboard/index.html) header for one-click access.
 
+### 7. Chronological Session Timeline Explorer & Detail Drawer
+- **Interactive Threat Graph**: Added a **Threat Timeline** tab in the central dashboard visualization selector, rendering a horizontal scatter plot of transaction logs. Plots requests chronologically against their Variational Free Energy (VFE) score.
+- **Color-Coded Nodes**: Nodes are color-coded in real-time by threat level:
+  - `Green` (Safe/Allow, VFE < 1.0)
+  - `Gold` (Suspicious/Monitor, 1.0 <= VFE < 3.5)
+  - `Red` (Blocked/Quarantined, VFE >= 3.5 or is_blocked=true)
+- **Interactive Threshold Gate**: Renders a red dashed horizontal threshold line representing the current L4 Theta ($\theta$) setting. Hovering over nodes shows immediate request metrics.
+- **Slide-out Forensic Panel**: Clicking any node on the timeline slides open a right-hand detail drawer featuring smooth slide transitions, blur backdrop-filter styling, and glassmorphism.
+- **MinIO-Backed Retrieval**: Added API endpoint `GET /api/transaction/detail` which retrieves full payload details (raw request prompts, translated prompts, response payloads, client IP, agent key, and user agent) on-demand by querying the Go memory cache, the **MinIO WORM Compliance Datalake** (`compliance-audit-logs` bucket at `audit/YYYY-MM-DD/<tx_id>.json`), and PostgreSQL forensic database tables (`agent_forensic_log`).
+- **Review in Quarantine**: Provides deep-linking action buttons to inspect blocked sessions directly in the Quarantine Workspace.
+
 ---

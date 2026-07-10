@@ -993,6 +993,7 @@
                     <button class="btn-vis" id="btn-vis-particles" onclick="switchVis('particles')">Gravity Field</button>
                     <button class="btn-vis" id="btn-vis-radar" onclick="switchVis('radar')">Quantum Orbitals</button>
                     <button class="btn-vis" id="btn-vis-streamgraph" onclick="switchVis('streamgraph')">Surge Stream</button>
+                    <button class="btn-vis" id="btn-vis-timeline" onclick="switchVis('timeline')">Threat Timeline</button>
                 </div>
                 
                 <!-- Visualization Screens -->
@@ -1014,6 +1015,14 @@
                 <div id="vis-screen-streamgraph" class="vis-screen" style="width: 100%; height: 430px; position: relative; background: #0b0f19; border-radius: 6px; overflow: hidden; border: 1px solid rgba(255,255,255,0.05);">
                     <canvas id="streamgraph-canvas" style="width: 100%; height: 100%; display: block;"></canvas>
                     <div style="position:absolute; top:10px; left:10px; font-size:11px; color:#10b981; background:rgba(15,23,42,0.8); padding:4px 8px; border-radius:4px; pointer-events:none;">FLUID SURGE STREAMGRAPH</div>
+                </div>
+
+                <div id="vis-screen-timeline" class="vis-screen" style="width: 100%; height: 430px; position: relative; background: #0b0f19; border-radius: 6px; overflow: hidden; border: 1px solid rgba(255,255,255,0.05); display: flex; flex-direction: column;">
+                    <div style="position:absolute; top:10px; left:10px; font-size:11px; color:#c084fc; background:rgba(15,23,42,0.8); padding:4px 8px; border-radius:4px; pointer-events:none; z-index: 5; font-weight:600; text-transform:uppercase;">Chronological Threat Timeline</div>
+                    <div style="flex:1; padding-top:40px; position:relative; overflow-y:auto; overflow-x:hidden;" id="timeline-chart-canvas-container">
+                        <canvas id="timeline-canvas" style="width: 100%; height: 100%; display: block;"></canvas>
+                    </div>
+                    <div id="timeline-tooltip" style="position: absolute; display: none; background: rgba(15, 23, 42, 0.95); border: 1px solid rgba(255,255,255,0.1); border-radius: 4px; padding: 8px; font-size: 11px; color: #fff; z-index: 100; pointer-events: none; box-shadow: 0 4px 12px rgba(0,0,0,0.5); font-family: monospace;"></div>
                 </div>
             </div>
 
@@ -1326,6 +1335,14 @@
                 const globalL2 = sortedLogs.map(l => l.vfe_score || 0.0);
                 const globalL3 = sortedLogs.map(l => l.vfe_score_l3 || 0.0);
                 drawVfeChart(globalL1, globalL2, globalL3);
+
+                // Update Threat Timeline data if active
+                if (activeVis === "timeline") {
+                    const maxTimelineLogs = 80;
+                    const slicedLogs = logs.slice(0, maxTimelineLogs);
+                    timelineLogs = slicedLogs.reverse();
+                    renderTimelineGraph();
+                }
 
                 // Render only the latest 50 logs in the sidebar list for performance
                 renderLogs(logs.slice(0, 50));
@@ -1810,6 +1827,10 @@
         let lastSeenTxId = null;
         window.heatmapFlash = 0;
 
+        // Threat Timeline state
+        let timelineLogs = [];
+        let hoveredNode = null;
+
         function switchVis(visId) {
             activeVis = visId;
             
@@ -1839,8 +1860,332 @@
                 } else if (activeVis === "streamgraph") {
                     resizeCanvas("streamgraph-canvas");
                     animateStreamgraph();
+                } else if (activeVis === "timeline") {
+                    resizeCanvas("timeline-canvas");
+                    initTimelineEvents();
+                    renderTimelineGraph();
                 }
             }, 50);
+        }
+
+        function renderTimelineGraph() {
+            const canvas = document.getElementById("timeline-canvas");
+            if (!canvas) return;
+            const ctx = canvas.getContext("2d");
+            if (!ctx) return;
+
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            const width = canvas.width;
+            const height = canvas.height;
+
+            const paddingLeft = 60;
+            const paddingRight = 30;
+            const paddingTop = 40;
+            const paddingBottom = 40;
+
+            const chartWidth = width - paddingLeft - paddingRight;
+            const chartHeight = height - paddingTop - paddingBottom;
+
+            // 1. Draw Grid and Axes
+            ctx.strokeStyle = "rgba(255, 255, 255, 0.05)";
+            ctx.lineWidth = 1;
+            
+            // Y-axis grid lines (VFE scores 0 to 8)
+            const maxVFE = 8.0;
+            for (let i = 0; i <= 8; i += 2) {
+                const y = paddingTop + chartHeight - (i / maxVFE) * chartHeight;
+                ctx.beginPath();
+                ctx.moveTo(paddingLeft, y);
+                ctx.lineTo(width - paddingRight, y);
+                ctx.stroke();
+
+                // Y-axis labels
+                ctx.fillStyle = "var(--text-muted)";
+                ctx.font = "10px monospace";
+                ctx.textAlign = "right";
+                ctx.textBaseline = "middle";
+                ctx.fillText(i.toFixed(1), paddingLeft - 10, y);
+            }
+
+            // Draw Threshold line (Theta)
+            const theta = parseFloat(document.getElementById("theta-val-display")?.textContent || "3.5");
+            const thetaY = paddingTop + chartHeight - (theta / maxVFE) * chartHeight;
+            ctx.strokeStyle = "rgba(239, 68, 68, 0.4)";
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([5, 5]);
+            ctx.beginPath();
+            ctx.moveTo(paddingLeft, thetaY);
+            ctx.lineTo(width - paddingRight, thetaY);
+            ctx.stroke();
+            ctx.setLineDash([]); // reset
+
+            // Threshold label
+            ctx.fillStyle = "rgba(239, 68, 68, 0.8)";
+            ctx.font = "9px sans-serif";
+            ctx.textAlign = "left";
+            ctx.fillText(`THETA THRESHOLD (${theta.toFixed(2)})`, paddingLeft + 10, thetaY - 6);
+
+            // Draw X and Y Axes
+            ctx.strokeStyle = "rgba(255, 255, 255, 0.15)";
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            // Y-axis
+            ctx.moveTo(paddingLeft, paddingTop);
+            ctx.lineTo(paddingLeft, height - paddingBottom);
+            // X-axis
+            ctx.lineTo(width - paddingRight, height - paddingBottom);
+            ctx.stroke();
+
+            // Label Y Axis
+            ctx.save();
+            ctx.translate(15, height / 2);
+            ctx.rotate(-Math.PI / 2);
+            ctx.fillStyle = "var(--text-muted)";
+            ctx.font = "10px sans-serif";
+            ctx.textAlign = "center";
+            ctx.fillText("VARIATIONAL FREE ENERGY (VFE)", 0, 0);
+            ctx.restore();
+
+            if (timelineLogs.length === 0) {
+                ctx.fillStyle = "var(--text-muted)";
+                ctx.font = "13px sans-serif";
+                ctx.textAlign = "center";
+                ctx.fillText("Waiting for transaction logs...", width / 2, height / 2);
+                return;
+            }
+
+            // 2. Plot Nodes
+            const count = timelineLogs.length;
+            const stepX = count > 1 ? chartWidth / (count - 1) : chartWidth;
+
+            // Map nodes coordinates
+            timelineLogs.forEach((log, index) => {
+                const x = paddingLeft + index * stepX;
+                const vfe = Math.min(log.vfe_score, maxVFE);
+                const y = paddingTop + chartHeight - (vfe / maxVFE) * chartHeight;
+                log.canvasX = x;
+                log.canvasY = y;
+            });
+
+            // Draw connection line
+            ctx.strokeStyle = "rgba(6, 182, 212, 0.15)";
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            timelineLogs.forEach((log, index) => {
+                if (index === 0) ctx.moveTo(log.canvasX, log.canvasY);
+                else ctx.lineTo(log.canvasX, log.canvasY);
+            });
+            ctx.stroke();
+
+            // Draw Nodes
+            timelineLogs.forEach((log) => {
+                let color = "var(--color-allow)";
+                let shadowColor = "rgba(16, 185, 129, 0.4)";
+                if (log.is_blocked || log.vfe_score >= theta) {
+                    color = "var(--color-block)";
+                    shadowColor = "rgba(239, 68, 68, 0.6)";
+                } else if (log.vfe_score >= 1.0) {
+                    color = "var(--color-monitor)";
+                    shadowColor = "rgba(245, 158, 11, 0.4)";
+                }
+
+                // Draw outer glowing circle
+                ctx.fillStyle = shadowColor;
+                ctx.beginPath();
+                ctx.arc(log.canvasX, log.canvasY, 7, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Draw inner solid circle
+                ctx.fillStyle = color;
+                ctx.beginPath();
+                ctx.arc(log.canvasX, log.canvasY, 4, 0, Math.PI * 2);
+                ctx.fill();
+            });
+
+            // Highlight hovered node
+            if (hoveredNode) {
+                ctx.strokeStyle = "#fff";
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(hoveredNode.canvasX, hoveredNode.canvasY, 9, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+        }
+
+        let isTimelineEventsInit = false;
+        function initTimelineEvents() {
+            if (isTimelineEventsInit) return;
+            const canvas = document.getElementById("timeline-canvas");
+            const tooltip = document.getElementById("timeline-tooltip");
+            if (!canvas || !tooltip) return;
+
+            canvas.addEventListener("mousemove", (e) => {
+                if (activeVis !== "timeline") return;
+                
+                const rect = canvas.getBoundingClientRect();
+                const mouseX = ((e.clientX - rect.left) / rect.width) * canvas.width;
+                const mouseY = ((e.clientY - rect.top) / rect.height) * canvas.height;
+
+                let found = null;
+                const hoverRadius = 12;
+
+                for (let log of timelineLogs) {
+                    const dx = log.canvasX - mouseX;
+                    const dy = log.canvasY - mouseY;
+                    const distance = Math.sqrt(dx*dx + dy*dy);
+                    if (distance <= hoverRadius) {
+                        found = log;
+                        break;
+                    }
+                }
+
+                if (found !== hoveredNode) {
+                    hoveredNode = found;
+                    renderTimelineGraph();
+                }
+
+                if (hoveredNode) {
+                    canvas.style.cursor = "pointer";
+                    tooltip.style.display = "block";
+                    tooltip.style.left = `${e.clientX - rect.left + 15}px`;
+                    tooltip.style.top = `${e.clientY - rect.top - 15}px`;
+
+                    let status = "ALLOW";
+                    if (hoveredNode.is_blocked) status = "BLOCK";
+                    else if (hoveredNode.vfe_score >= 1.0) status = "MONITOR";
+
+                    const timeStr = new Date(hoveredNode.updated_at).toLocaleTimeString();
+
+                    tooltip.innerHTML = `
+                        <strong>Time:</strong> ${timeStr}<br>
+                        <strong>Session:</strong> ${hoveredNode.session_id.substring(0, 8)}...<br>
+                        <strong>VFE Score:</strong> ${hoveredNode.vfe_score.toFixed(3)}<br>
+                        <strong>Status:</strong> <span style="color:${status === 'BLOCK' ? 'var(--color-block)' : status === 'MONITOR' ? 'var(--color-monitor)' : 'var(--color-allow)'}">${status}</span><br>
+                        <span style="font-size:9px; color:var(--text-muted); margin-top:4px; display:block;">Click node to view details</span>
+                    `;
+                } else {
+                    canvas.style.cursor = "default";
+                    tooltip.style.display = "none";
+                }
+            });
+
+            canvas.addEventListener("mouseout", () => {
+                hoveredNode = null;
+                tooltip.style.display = "none";
+                renderTimelineGraph();
+            });
+
+            canvas.addEventListener("click", () => {
+                if (activeVis === "timeline" && hoveredNode) {
+                    openDetailDrawer(hoveredNode);
+                }
+            });
+
+            isTimelineEventsInit = true;
+        }
+
+        async function openDetailDrawer(log) {
+            const drawer = document.getElementById("threat-detail-drawer");
+            if (!drawer) return;
+
+            drawer.style.right = "0";
+
+            document.getElementById("drawer-tx-id").textContent = log.transaction_id;
+            const timeStr = new Date(log.updated_at).toLocaleString();
+            document.getElementById("drawer-timestamp").textContent = timeStr;
+            document.getElementById("drawer-session-id").textContent = log.session_id;
+            document.getElementById("drawer-vfe-score").textContent = log.vfe_score.toFixed(4);
+
+            const badge = document.getElementById("drawer-decision-badge");
+            let status = "ALLOW";
+            if (log.is_blocked) status = "BLOCK";
+            else if (log.vfe_score >= 1.0) status = "MONITOR";
+
+            badge.className = `status-badge status-${status.toLowerCase()}`;
+            badge.textContent = status;
+
+            document.getElementById("drawer-client-ip").textContent = "Loading...";
+            document.getElementById("drawer-user-agent").textContent = "Loading...";
+            document.getElementById("drawer-claimed-key").textContent = "Loading...";
+            document.getElementById("drawer-observation-name").textContent = "Loading...";
+            document.getElementById("drawer-payload-raw").textContent = "Loading...";
+            document.getElementById("drawer-payload-trans").textContent = "Loading...";
+            document.getElementById("drawer-response-raw").textContent = "Loading...";
+
+            const quarantineLink = document.getElementById("drawer-quarantine-link");
+            if (log.is_blocked || log.vfe_score >= 3.5) {
+                quarantineLink.style.display = "inline-flex";
+            } else {
+                quarantineLink.style.display = "none";
+            }
+
+            try {
+                const datePart = log.updated_at.split("T")[0];
+                const resp = await fetch(`/api/transaction/detail?tx_id=${log.transaction_id}&date=${datePart}`);
+                if (!resp.ok) throw new Error("Datalake log not found");
+                const detail = await resp.json();
+
+                document.getElementById("drawer-client-ip").textContent = detail.client_ip || "N/A";
+                document.getElementById("drawer-user-agent").textContent = detail.user_agent || "N/A";
+                document.getElementById("drawer-claimed-key").textContent = detail.claimed_key || "N/A";
+
+                let obsName = "Safe";
+                let obsVal = detail.observation;
+                if (detail.observation_vector && detail.observation_vector.length > 0) {
+                    obsVal = detail.observation_vector[0];
+                }
+                switch(obsVal) {
+                case 0: obsName = "Normal Read (OBS_READ)"; break;
+                case 1: obsName = "Structure Shift (OBS_STRUCTURE_SHIFT)"; break;
+                case 2: obsName = "Input Error (OBS_INPUT_ERROR)"; break;
+                case 3: obsName = "Ingress Flood (OBS_INGRESS_FLOOD)"; break;
+                }
+                document.getElementById("drawer-observation-name").textContent = obsName;
+
+                const formatJson = (val) => {
+                    if (!val) return "";
+                    if (typeof val === "object") return JSON.stringify(val, null, 2);
+                    try {
+                        return JSON.stringify(JSON.parse(val), null, 2);
+                    } catch(e) {
+                        return val || "";
+                    }
+                };
+
+                document.getElementById("drawer-payload-raw").textContent = formatJson(detail.payload);
+                document.getElementById("drawer-payload-trans").textContent = formatJson(detail.translated_payload || detail.payload);
+                document.getElementById("drawer-response-raw").textContent = formatJson(detail.response || detail.rehydrated_resp);
+
+            } catch(e) {
+                document.getElementById("drawer-client-ip").textContent = "N/A (Historical Archive)";
+                document.getElementById("drawer-user-agent").textContent = "N/A";
+                document.getElementById("drawer-claimed-key").textContent = "N/A";
+                
+                let obsVal = 0;
+                if (log.observation_vector && log.observation_vector.length > 0) {
+                    obsVal = log.observation_vector[0];
+                }
+                let obsName = "Safe";
+                switch(obsVal) {
+                case 0: obsName = "Normal Read (OBS_READ)"; break;
+                case 1: obsName = "Structure Shift (OBS_STRUCTURE_SHIFT)"; break;
+                case 2: obsName = "Input Error (OBS_INPUT_ERROR)"; break;
+                case 3: obsName = "Ingress Flood (OBS_INGRESS_FLOOD)"; break;
+                }
+                document.getElementById("drawer-observation-name").textContent = obsName;
+                document.getElementById("drawer-payload-raw").textContent = "Log payload archived in cold storage / MinIO Offline.";
+                document.getElementById("drawer-payload-trans").textContent = "";
+                document.getElementById("drawer-response-raw").textContent = "";
+            }
+        }
+
+        function closeDetailDrawer() {
+            const drawer = document.getElementById("threat-detail-drawer");
+            if (drawer) {
+                drawer.style.right = "-480px";
+            }
         }
 
         function resizeCanvas(canvasId) {
@@ -1859,6 +2204,9 @@
                 resizeCanvas("radar-canvas");
             } else if (activeVis === "streamgraph") {
                 resizeCanvas("streamgraph-canvas");
+            } else if (activeVis === "timeline") {
+                resizeCanvas("timeline-canvas");
+                renderTimelineGraph();
             }
         });
 
@@ -4124,6 +4472,83 @@
                 </div>
                 <div id="minio-upload-status" style="display:none; font-size:10px; color:#c084fc; margin-top:-8px; padding-left:4px;"></div>
             </div>
+        </div>
+    </div>
+
+    <!-- Timeline Drill-down Drawer -->
+    <div id="threat-detail-drawer" style="position: fixed; top: 0; right: -480px; width: 450px; height: 100%; background: rgba(15, 23, 42, 0.95); border-left: 1px solid var(--border-color); box-shadow: -10px 0 30px rgba(0,0,0,0.6); z-index: 10005; display: flex; flex-direction: column; transition: right 0.3s cubic-bezier(0.4, 0, 0.2, 1); backdrop-filter: blur(12px);">
+        <!-- Drawer Header -->
+        <div style="padding: 20px; background: rgba(20, 24, 33, 0.7); border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;">
+            <div style="display:flex; flex-direction:column; gap:4px;">
+                <span style="font-weight: 700; font-size: 14px; color: #c084fc; text-transform: uppercase; letter-spacing: 0.5px;">Transaction Details</span>
+                <span id="drawer-tx-id" style="font-size: 10px; color: var(--text-muted); font-family: monospace;">No ID selected</span>
+            </div>
+            <button onclick="closeDetailDrawer()" style="background: none; border: none; color: var(--text-muted); font-size: 24px; cursor: pointer; line-height: 1;">&times;</button>
+        </div>
+
+        <!-- Drawer Body -->
+        <div style="padding: 20px; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 16px;">
+            <!-- Metadata Summary -->
+            <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: 6px; padding: 12px;">
+                <div style="display:grid; grid-template-columns: 80px 1fr; gap: 6px; font-size: 11px;">
+                    <span style="color: var(--text-muted);">Timestamp:</span>
+                    <span id="drawer-timestamp" style="font-weight:600;">-</span>
+
+                    <span style="color: var(--text-muted);">Session UUID:</span>
+                    <span id="drawer-session-id" style="font-family: monospace; word-break:break-all;">-</span>
+
+                    <span style="color: var(--text-muted);">Client IP:</span>
+                    <span id="drawer-client-ip" style="font-family: monospace;">-</span>
+
+                    <span style="color: var(--text-muted);">User Agent:</span>
+                    <span id="drawer-user-agent" style="word-break:break-all;">-</span>
+
+                    <span style="color: var(--text-muted);">Claimed Key:</span>
+                    <span id="drawer-claimed-key" style="font-family: monospace; word-break:break-all;">-</span>
+                </div>
+            </div>
+
+            <!-- Active Inference Parameters -->
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+                <div style="background:rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius:6px; padding:10px; display:flex; justify-content:space-between; align-items:center;">
+                    <span style="font-size:10px; font-weight:600; color:var(--text-muted); text-transform:uppercase;">VFE Score</span>
+                    <span id="drawer-vfe-score" style="font-size:13px; font-weight:700; font-family:monospace; color:var(--color-cyan);">0.00</span>
+                </div>
+                <div style="background:rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius:6px; padding:10px; display:flex; justify-content:space-between; align-items:center;">
+                    <span style="font-size:10px; font-weight:600; color:var(--text-muted); text-transform:uppercase;">Decision</span>
+                    <span id="drawer-decision-badge" class="status-badge status-allow">Allow</span>
+                </div>
+            </div>
+
+            <!-- Active Inference Observation -->
+            <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: 6px; padding: 10px 12px; display:flex; justify-content:space-between; align-items:center;">
+                <span style="font-size:10px; font-weight:600; color:var(--text-muted); text-transform:uppercase;">Observation Scanned</span>
+                <span id="drawer-observation-name" style="font-size:11px; font-weight:700; color:#fff; text-transform:uppercase;">-</span>
+            </div>
+
+            <!-- Payload Prompts Visualizer -->
+            <div style="display:flex; flex-direction:column; gap:4px;">
+                <span style="font-size:10px; font-weight:600; color:var(--text-muted); text-transform:uppercase;">Raw Input Prompt Payload</span>
+                <pre id="drawer-payload-raw" style="background:#090b11; border:1px solid var(--border-color); border-radius:4px; padding:10px; font-family:monospace; font-size:10px; color:#cbd5e1; max-height:150px; overflow-y:auto; white-space:pre-wrap; margin:0; line-height:1.3;"></pre>
+            </div>
+
+            <div style="display:flex; flex-direction:column; gap:4px;">
+                <span style="font-size:10px; font-weight:600; color:var(--text-muted); text-transform:uppercase;">Redacted / Translated Prompt</span>
+                <pre id="drawer-payload-trans" style="background:#090b11; border:1px solid var(--border-color); border-radius:4px; padding:10px; font-family:monospace; font-size:10px; color:#a7f3d0; max-height:150px; overflow-y:auto; white-space:pre-wrap; margin:0; line-height:1.3;"></pre>
+            </div>
+
+            <div style="display:flex; flex-direction:column; gap:4px;">
+                <span style="font-size:10px; font-weight:600; color:var(--text-muted); text-transform:uppercase;">Upstream LLM Response</span>
+                <pre id="drawer-response-raw" style="background:#090b11; border:1px solid var(--border-color); border-radius:4px; padding:10px; font-family:monospace; font-size:10px; color:#cbd5e1; max-height:150px; overflow-y:auto; white-space:pre-wrap; margin:0; line-height:1.3;"></pre>
+            </div>
+        </div>
+
+        <!-- Drawer Footer -->
+        <div style="padding: 16px; border-top: 1px solid var(--border-color); background: rgba(20, 24, 33, 0.7); display:flex; justify-content:space-between; gap:10px;">
+            <button class="btn" onclick="closeDetailDrawer()" style="flex:1; justify-content:center; margin:0; height:32px;">Close Details</button>
+            <a id="drawer-quarantine-link" href="/quarantine.html" class="btn btn-primary" style="flex:1.2; justify-content:center; margin:0; text-decoration:none; display:none; align-items:center; height:32px;">
+                ⚠️ View in Quarantine
+            </a>
         </div>
     </div>
 </body>

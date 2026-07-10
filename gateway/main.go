@@ -173,6 +173,7 @@ func main() {
 		mux1.HandleFunc("/playground.html", handlePlaygroundPage)
 		mux1.HandleFunc("/api/playground/policy", handleAPIPlaygroundGetPolicy)
 		mux1.HandleFunc("/api/playground/simulate", handleAPIPlaygroundSimulate)
+		mux1.HandleFunc("/api/transaction/detail", handleAPITransactionDetail)
 		mux1.HandleFunc("/", handleDashboard)
 
 		log.Printf("Go Gateway API & Analytics Dashboard listening on 0.0.0.0:1173...")
@@ -3321,5 +3322,109 @@ func handleAPIPlaygroundSimulate(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
+}
+
+func handleAPITransactionDetail(w http.ResponseWriter, r *http.Request) {
+	if setupCORSHeaders(w, r) {
+		return
+	}
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	txID := r.URL.Query().Get("tx_id")
+	dateStr := r.URL.Query().Get("date") // Format: YYYY-MM-DD
+	if txID == "" {
+		http.Error(w, "Missing 'tx_id' parameter", http.StatusBadRequest)
+		return
+	}
+
+	// 1. Primary: Try to fetch from MinIO datalake (contains complete AuditLogPayload)
+	if minioClient != nil && minioBucket != "" {
+		if dateStr == "" {
+			dateStr = time.Now().Format("2006-01-02")
+		}
+		objectName := fmt.Sprintf("audit/%s/%s.json", dateStr, txID)
+		
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		obj, err := minioClient.GetObject(ctx, minioBucket, objectName, minio.GetObjectOptions{})
+		if err == nil {
+			defer obj.Close()
+			_, err = obj.Stat()
+			if err == nil {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.Copy(w, obj)
+				return
+			}
+		}
+	}
+
+	// 2. Secondary fallback: Check in-memory sessionCache for PayloadDetail
+	var foundPayload *PayloadDetail
+	sessionCache.Range(func(key, value interface{}) bool {
+		state, ok := value.(*ActiveInfState)
+		if !ok {
+			return true
+		}
+		state.Lock()
+		for _, p := range state.HistoryPayloads {
+			if p.TxID == txID {
+				foundPayload = &p
+				state.Unlock()
+				return false
+			}
+		}
+		state.Unlock()
+		return true
+	})
+
+	if foundPayload != nil {
+		resp := map[string]interface{}{
+			"transaction_id":     foundPayload.TxID,
+			"session_id":         "Active Cache Session",
+			"timestamp":          time.Now(),
+			"payload":            foundPayload.RawRequest,
+			"translated_payload": foundPayload.TranslatedRequest,
+			"response":           foundPayload.RawResponse,
+			"rehydrated_resp":    foundPayload.TranslatedResponse,
+			"source":             "memory_cache",
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+		return
+	}
+
+	// 3. Third fallback: Check PostgreSQL agent_forensic_log table for block details
+	if DB != nil {
+		var clientIP, claimedKey, userAgent, attemptedPayload, reason string
+		var timestamp time.Time
+		err := DB.QueryRow(`
+			SELECT timestamp, client_ip, claimed_key, user_agent, attempted_payload, reason
+			FROM agent_forensic_log
+			WHERE id = $1
+		`, txID).Scan(&timestamp, &clientIP, &claimedKey, &userAgent, &attemptedPayload, &reason)
+		if err == nil {
+			resp := map[string]interface{}{
+				"transaction_id": txID,
+				"session_id":     claimedKey,
+				"timestamp":      timestamp,
+				"client_ip":      clientIP,
+				"claimed_key":    claimedKey,
+				"user_agent":     userAgent,
+				"payload":        attemptedPayload,
+				"reason":         reason,
+				"is_blocked":     true,
+				"source":         "forensics_database",
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(resp)
+			return
+		}
+	}
+
+	http.Error(w, "Transaction log not found in datalake or cache database", http.StatusNotFound)
 }
 
