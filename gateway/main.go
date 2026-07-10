@@ -1327,6 +1327,22 @@ func handleAPIPolicy(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 }
 
+func isSimulationSession(sessionID string) bool {
+	if strings.HasPrefix(sessionID, "sim-worker-") {
+		return true
+	}
+	if simUUIDs[sessionID] {
+		return true
+	}
+	if val, ok := sessionNameCache.Load(sessionID); ok {
+		resolved := val.(string)
+		if strings.HasPrefix(resolved, "sim-worker-") {
+			return true
+		}
+	}
+	return false
+}
+
 func handleAPILogs(w http.ResponseWriter, r *http.Request) {
 	limitStr := r.URL.Query().Get("limit")
 	limit := 500
@@ -1356,7 +1372,7 @@ func handleAPILogs(w http.ResponseWriter, r *http.Request) {
 			for _, logStr := range rawLogs {
 				var entry LogEntry
 				if err := json.Unmarshal([]byte(logStr), &entry); err == nil {
-					if !includeSim && simUUIDs[entry.SessionID] {
+					if !includeSim && isSimulationSession(entry.SessionID) {
 						continue
 					}
 					if val, ok := sessionNameCache.Load(entry.SessionID); ok {
@@ -1407,7 +1423,7 @@ func handleAPILogs(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		if !includeSim && simUUIDs[sessID] {
+		if !includeSim && isSimulationSession(sessID) {
 			continue
 		}
 
