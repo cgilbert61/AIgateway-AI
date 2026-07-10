@@ -228,7 +228,10 @@ func resolveSessionUUID(sessionID string) (uuid.UUID, error) {
 		return u, nil
 	}
 	res := uuid.NewSHA1(uuid.NameSpaceDNS, []byte(sessionID))
-	sessionNameCache.Store(res.String(), sessionID)
+	uuidStr := res.String()
+	if _, cached := sessionNameCache.Load(uuidStr); !cached {
+		sessionNameCache.Store(uuidStr, sessionID)
+	}
 	return res, nil
 }
 
@@ -357,12 +360,12 @@ func LogTransactionState(txID, sessionID string, observation int, vfeL1, vfeL2, 
 		}
 		data, err := json.Marshal(entry)
 		if err == nil {
-			err = redisClient.LPush(redisCtx, "active_inference:logs", data).Err()
+			pipe := redisClient.Pipeline()
+			pipe.LPush(redisCtx, "active_inference:logs", data)
+			pipe.LTrim(redisCtx, "active_inference:logs", 0, 999)
+			pipe.Publish(redisCtx, "active_inference:transactions", data)
+			_, err = pipe.Exec(redisCtx)
 			if err == nil {
-				redisClient.LTrim(redisCtx, "active_inference:logs", 0, 999)
-				// Publish asynchronously/directly to Redis Pub/Sub channel
-				_ = redisClient.Publish(redisCtx, "active_inference:transactions", data).Err()
-
 				atomic.AddUint64(&localDeltaRequests, 1)
 				if isBlocked {
 					atomic.AddUint64(&localDeltaBlocks, 1)
