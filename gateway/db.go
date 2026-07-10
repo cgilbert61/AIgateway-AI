@@ -360,6 +360,9 @@ func LogTransactionState(txID, sessionID string, observation int, vfeL1, vfeL2, 
 			err = redisClient.LPush(redisCtx, "active_inference:logs", data).Err()
 			if err == nil {
 				redisClient.LTrim(redisCtx, "active_inference:logs", 0, 999)
+				// Publish asynchronously/directly to Redis Pub/Sub channel
+				_ = redisClient.Publish(redisCtx, "active_inference:transactions", data).Err()
+
 				atomic.AddUint64(&localDeltaRequests, 1)
 				if isBlocked {
 					atomic.AddUint64(&localDeltaBlocks, 1)

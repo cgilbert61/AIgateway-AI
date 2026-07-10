@@ -3,6 +3,7 @@ import time
 import json
 import select
 import psycopg2
+import redis
 import requests
 import math
 import numpy as np
@@ -99,7 +100,7 @@ def get_l3_gamma():
         print(f"[Sidecar] Error reading config for L3 gamma: {e}")
     return 15.0
 
-def handle_notification(tx_uuid):
+def handle_notification(event_or_uuid):
     if not db_pool:
         print("[Sidecar Error] DB connection pool not initialized.")
         return
@@ -108,16 +109,25 @@ def handle_notification(tx_uuid):
     try:
         cur = conn.cursor()
         
-        # 1. Targeted indexed read to fetch the transaction payload
-        cur.execute(
-            "SELECT session_id, observation_vector, vfe_score, is_blocked FROM runtime_inference_state WHERE transaction_id = %s",
-            (tx_uuid,)
-        )
-        row = cur.fetchone()
-        if not row:
+        if isinstance(event_or_uuid, dict):
+            session_id = event_or_uuid.get("session_id")
+            obs_vector = event_or_uuid.get("observation_vector")
+            vfe_score = event_or_uuid.get("vfe_score")
+            is_blocked = event_or_uuid.get("is_blocked")
+        else:
+            # 1. Targeted indexed read to fetch the transaction payload
+            cur.execute(
+                "SELECT session_id, observation_vector, vfe_score, is_blocked FROM runtime_inference_state WHERE transaction_id = %s",
+                (event_or_uuid,)
+            )
+            row = cur.fetchone()
+            if not row:
+                return
+            session_id, obs_vector, vfe_score, is_blocked = row
+
+        if obs_vector is None or session_id is None:
             return
             
-        session_id, obs_vector, vfe_score, is_blocked = row
         obs_1 = obs_vector[0] # Layer 2 compliance observation index (0-3)
 
         # 2. Fetch session matrices
@@ -255,6 +265,39 @@ def run_flask():
     # Bind to port 5001 as specified in deployment config
     app_api.run(host="0.0.0.0", port=5001, debug=False, use_reloader=False)
 
+def run_redis_subscriber(executor):
+    redis_url = os.environ.get("REDIS_URL")
+    if not redis_url:
+        print("[Sidecar] REDIS_URL not set. Skipping Redis Pub/Sub subscriber.")
+        return
+        
+    if not redis_url.startswith("redis://"):
+        redis_url = f"redis://{redis_url}"
+        
+    print(f"[Sidecar] Connecting to Redis at {redis_url}...")
+    r = redis.Redis.from_url(redis_url, socket_timeout=5)
+    pubsub = r.pubsub()
+    pubsub.subscribe("active_inference:transactions")
+    print("[Sidecar] Subscribed to Redis Pub/Sub channel: active_inference:transactions")
+    
+    while True:
+        try:
+            message = pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+            if message:
+                payload = json.loads(message["data"])
+                executor.submit(handle_notification, payload)
+        except redis.ConnectionError as e:
+            print(f"[Sidecar Error] Lost Redis connection, retrying in 2 seconds: {e}")
+            time.sleep(2)
+            try:
+                pubsub = r.pubsub()
+                pubsub.subscribe("active_inference:transactions")
+            except:
+                pass
+        except Exception as e:
+            print(f"[Sidecar Error] Error in Redis subscriber loop: {e}")
+            time.sleep(1)
+
 def main():
     # 0. Initialize threaded database connection pool
     init_db_pool()
@@ -265,6 +308,11 @@ def main():
 
     # 2. Initialize thread pool executor for processing notifications concurrently
     executor = ThreadPoolExecutor(max_workers=3)
+
+    # 3. Start Redis subscriber in a background thread if REDIS_URL is configured
+    if os.environ.get("REDIS_URL"):
+        t_redis = threading.Thread(target=run_redis_subscriber, args=(executor,), daemon=True)
+        t_redis.start()
 
     print("[Sidecar] Starting PostgreSQL notification listener loop...")
     conn = get_db_connection()

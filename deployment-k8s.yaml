@@ -195,6 +195,8 @@ spec:
         env:
         - name: DATABASE_URL
           value: postgresql://user:password@aiaiai-postgres:5432/postgres?sslmode=disable
+        - name: REDIS_URL
+          value: aiaiai-redis:6379
         - name: GATEWAY_URL
           value: http://aiaiai-gateway:1163
         resources:

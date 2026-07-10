@@ -78,6 +78,7 @@ services:
     container_name: aiaiai_python_sidecar
     environment:
       DATABASE_URL: postgresql://user:password@aiaiai_postgres:5432/postgres?sslmode=disable
+      REDIS_URL: aiaiai_redis:6379
       GATEWAY_URL: http://aiaiai_gateway:1163
       OMP_NUM_THREADS: 1
       MKL_NUM_THREADS: 1

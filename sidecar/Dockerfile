@@ -9,4 +9,4 @@ RUN pip install --no-cache-dir --no-index --find-links=./wheels -r requirements.
 
 COPY *.py ./
 
-ENTRYPOINT ["python", "app.py"]
+ENTRYPOINT ["python", "-u", "app.py"]
