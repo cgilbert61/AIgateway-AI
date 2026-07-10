@@ -22,6 +22,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/lib/pq"
 	"github.com/minio/minio-go/v7"
+	"github.com/open-policy-agent/opa/rego"
 )
 
 // Config represents the settings in gateway_config.json
@@ -169,6 +170,9 @@ func main() {
 		mux1.HandleFunc("/api/minio/object/upload", handleMinIOUploadObject)
 		mux1.HandleFunc("/flow.html", handleFlowPage)
 		mux1.HandleFunc("/quarantine.html", handleQuarantinePage)
+		mux1.HandleFunc("/playground.html", handlePlaygroundPage)
+		mux1.HandleFunc("/api/playground/policy", handleAPIPlaygroundGetPolicy)
+		mux1.HandleFunc("/api/playground/simulate", handleAPIPlaygroundSimulate)
 		mux1.HandleFunc("/", handleDashboard)
 
 		log.Printf("Go Gateway API & Analytics Dashboard listening on 0.0.0.0:1173...")
@@ -3085,5 +3089,237 @@ func handleMinIOUploadObject(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "SUCCESS", "message": "Uploaded successfully"})
+}
+
+type simulationRequest struct {
+	PolicyRego   string                 `json:"policy_rego"`
+	Role         string                 `json:"role"`
+	IsAgentRoute bool                   `json:"is_agent_route"`
+	Tool         string                 `json:"tool"`
+	ClientIP     string                 `json:"client_ip"`
+	Payload      map[string]interface{} `json:"payload"`
+}
+
+type simulationResponse struct {
+	OPA struct {
+		Allow  bool   `json:"allow"`
+		Reason string `json:"reason"`
+	} `json:"opa"`
+	VFE *struct {
+		Observation   string    `json:"observation"`
+		VFEScore      float64   `json:"vfe_score"`
+		DecidedAction string    `json:"decided_action"`
+		Theta         float64   `json:"theta"`
+		LeakyVFE      float64   `json:"leaky_vfe"`
+		Beliefs       []float64 `json:"beliefs"`
+		Explanation   string    `json:"explanation"`
+	} `json:"vfe"`
+}
+
+func handlePlaygroundPage(w http.ResponseWriter, r *http.Request) {
+	if setupCORSHeaders(w, r) {
+		return
+	}
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
+	path := "/app/dashboard/playground.html"
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		path = "./dashboard/playground.html"
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			path = "../dashboard/playground.html"
+			if _, err := os.Stat(path); os.IsNotExist(err) {
+				path = "gateway/dashboard/playground.html"
+			}
+		}
+	}
+	http.ServeFile(w, r, path)
+}
+
+func handleAPIPlaygroundGetPolicy(w http.ResponseWriter, r *http.Request) {
+	if setupCORSHeaders(w, r) {
+		return
+	}
+	policyPath := os.Getenv("REGO_POLICY_PATH")
+	if policyPath == "" {
+		policyPath = "/app/policies/tool_policy.rego"
+	}
+	if _, err := os.Stat(policyPath); os.IsNotExist(err) {
+		policyPath = "./policies/tool_policy.rego"
+		if _, err := os.Stat(policyPath); os.IsNotExist(err) {
+			policyPath = "../gateway/policies/tool_policy.rego"
+		}
+	}
+	content, err := os.ReadFile(policyPath)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to read policy file: %v", err), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain")
+	w.Write(content)
+}
+
+func handleAPIPlaygroundSimulate(w http.ResponseWriter, r *http.Request) {
+	if setupCORSHeaders(w, r) {
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req simulationRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid JSON request: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	ctx := context.Background()
+
+	// 1. Run dynamic in-memory OPA compilation and evaluation
+	opaRegoEngine := rego.New(
+		rego.Query("data.gateway.authz.decision"),
+		rego.Module("tool_policy.rego", req.PolicyRego),
+	)
+
+	pq, err := opaRegoEngine.PrepareForEval(ctx)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error": fmt.Sprintf("OPA Rego Compilation Failed: %v", err),
+		})
+		return
+	}
+
+	// Prepare mock payload structure for OPA input
+	opaInput := map[string]interface{}{
+		"role":           req.Role,
+		"is_agent_route": req.IsAgentRoute,
+		"payload":        req.Payload,
+	}
+
+	results, err := pq.Eval(ctx, rego.EvalInput(opaInput))
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error": fmt.Sprintf("OPA Rego Evaluation Failed: %v", err),
+		})
+		return
+	}
+
+	var opaAllow bool = false
+	var opaReason string = "OPA policy returned no decision."
+
+	if len(results) > 0 {
+		decisionMap, ok := results[0].Expressions[0].Value.(map[string]interface{})
+		if ok {
+			if a, exists := decisionMap["allow"].(bool); exists {
+				opaAllow = a
+			}
+			if r, exists := decisionMap["reason"].(string); exists {
+				opaReason = r
+			}
+		}
+	}
+
+	var resp simulationResponse
+	resp.OPA.Allow = opaAllow
+	resp.OPA.Reason = opaReason
+
+	// 2. Run transient sandboxed Active Inference simulation only if OPA allowed it
+	if opaAllow {
+		state := NewActiveInfState(DefaultMatrixA1, DefaultMatrixB1)
+		state.Theta = DefaultTheta
+
+		// Build simulated request body bytes
+		bodyBytes, _ := json.Marshal(req.Payload)
+
+		// Run Layer 1 Token scanning and classification
+		obs := ClassifyRequest("sim-session-id", bodyBytes, req.IsAgentRoute, state)
+
+		var obsName string
+		switch obs {
+		case OBS_READ:
+			obsName = "Normal Read (OBS_READ)"
+		case OBS_STRUCTURE_SHIFT:
+			obsName = "Structure Shift (OBS_STRUCTURE_SHIFT)"
+		case OBS_INPUT_ERROR:
+			obsName = "Input Error (OBS_INPUT_ERROR)"
+		case OBS_INGRESS_FLOOD:
+			obsName = "Ingress Flood (OBS_INGRESS_FLOOD)"
+		default:
+			obsName = fmt.Sprintf("Unknown Anomaly (%d)", obs)
+		}
+
+		// Run Layer 2 state perception update
+		state.UpdatePerception(nil, obs)
+
+		// Run action selection
+		qPi, _ := state.SelectActionEFE(state.PriorBeliefs, GatewayConfig.L2PrecisionGamma)
+
+		decidedActionInt := ACTION_ALLOW
+		maxProb := -1.0
+		for a, prob := range qPi {
+			if prob > maxProb {
+				maxProb = prob
+				decidedActionInt = a
+			}
+		}
+
+		if state.Theta < 4.95 && state.LeakyVFE > state.Theta {
+			decidedActionInt = ACTION_BLOCK
+		} else if decidedActionInt == ACTION_BLOCK {
+			decidedActionInt = ACTION_MONITOR
+		}
+
+		var decidedActionStr string
+		switch decidedActionInt {
+		case ACTION_ALLOW:
+			decidedActionStr = "ALLOW"
+		case ACTION_MONITOR:
+			decidedActionStr = "MONITOR"
+		case ACTION_BLOCK:
+			decidedActionStr = "BLOCK"
+		}
+
+		// Compile Explainable AI plain English text
+		explanation := fmt.Sprintf("Sensory scan categorized request tokens as: %s. ", obsName)
+		if obs == OBS_INPUT_ERROR {
+			explanation += "Syntax verification detected an invalid structural token anomaly. "
+		} else if obs == OBS_INGRESS_FLOOD {
+			explanation += "Ingress flood check triggered rate limiting/anomaly checks. "
+		}
+		explanation += fmt.Sprintf("Variational Free Energy surprise score is %0.4f. ", state.LeakyVFE)
+		if decidedActionInt == ACTION_BLOCK {
+			explanation += "Active Inference system initiated fail-closed containment, blocking the session."
+		} else if decidedActionInt == ACTION_MONITOR {
+			explanation += "Belief vector shifted to suspicious; auditing frequency increased."
+		} else {
+			explanation += "Belief state remains safe; request authorized."
+		}
+
+		resp.VFE = &struct {
+			Observation   string    `json:"observation"`
+			VFEScore      float64   `json:"vfe_score"`
+			DecidedAction string    `json:"decided_action"`
+			Theta         float64   `json:"theta"`
+			LeakyVFE      float64   `json:"leaky_vfe"`
+			Beliefs       []float64 `json:"beliefs"`
+			Explanation   string    `json:"explanation"`
+		}{
+			Observation:   obsName,
+			VFEScore:      state.LeakyVFE,
+			DecidedAction: decidedActionStr,
+			Theta:         state.Theta,
+			LeakyVFE:      state.LeakyVFE,
+			Beliefs:       state.PriorBeliefs,
+			Explanation:   explanation,
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }
 

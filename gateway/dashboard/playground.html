@@ -1,0 +1,774 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Project AIAIAI - Policy Playground</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.39.0/min/vs/loader.min.js"></script>
+    <style>
+        :root {
+            --bg-color: #0d0f14;
+            --panel-bg: rgba(20, 24, 33, 0.75);
+            --border-color: rgba(255, 255, 255, 0.05);
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --color-allow: #10b981;
+            --color-monitor: #f59e0b;
+            --color-block: #ef4444;
+            --color-cyan: #06b6d4;
+            --color-purple: #c084fc;
+            --glow-allow: drop-shadow(0 0 8px rgba(16, 185, 129, 0.6));
+            --glow-monitor: drop-shadow(0 0 8px rgba(245, 158, 11, 0.6));
+            --glow-block: drop-shadow(0 0 8px rgba(239, 68, 68, 0.6));
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            font-family: 'Inter', sans-serif;
+            overflow-x: hidden;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Top Header Navigation */
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 14px 28px;
+            background: rgba(15, 23, 42, 0.4);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--border-color);
+            z-index: 100;
+        }
+
+        .logo-section {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .logo-glow {
+            width: 14px;
+            height: 14px;
+            background-color: var(--color-cyan);
+            border-radius: 50%;
+            box-shadow: 0 0 10px var(--color-cyan);
+            animation: pulse 2s infinite ease-in-out;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 0.6; transform: scale(1); }
+            50% { opacity: 1; transform: scale(1.15); }
+        }
+
+        .logo-text {
+            font-weight: 800;
+            font-size: 16px;
+            letter-spacing: 0.1em;
+            background: linear-gradient(135deg, #fff 0%, var(--text-muted) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 20px;
+        }
+
+        .nav-link {
+            color: var(--text-muted);
+            text-decoration: none;
+            font-size: 13px;
+            font-weight: 500;
+            padding: 6px 12px;
+            border-radius: 4px;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .nav-link:hover {
+            color: #fff;
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        .nav-link.active {
+            color: var(--color-cyan);
+            background: rgba(6, 182, 212, 0.08);
+            border: 1px solid rgba(6, 182, 212, 0.2);
+        }
+
+        /* Workspace Grid Split Layout */
+        .workspace {
+            flex: 1;
+            display: grid;
+            grid-template-columns: 1.1fr 0.9fr;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .pane {
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            height: 100%;
+            border-right: 1px solid var(--border-color);
+        }
+
+        .pane-header {
+            padding: 12px 20px;
+            background: rgba(20, 24, 33, 0.85);
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .pane-title {
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .pane-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            background: rgba(13, 15, 20, 0.35);
+        }
+
+        /* Monaco Editor Container */
+        #editor-container {
+            flex: 1;
+            width: 100%;
+            height: 100%;
+            background: #1e1e1e;
+        }
+
+        /* Form Controls styling */
+        .card {
+            background: var(--panel-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 16px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.25);
+            backdrop-filter: blur(8px);
+        }
+
+        .card-header {
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--color-cyan);
+            margin-bottom: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        label {
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            color: var(--text-muted);
+        }
+
+        .form-input, select, textarea {
+            background: #090b11;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 8px 12px;
+            color: #fff;
+            font-family: inherit;
+            font-size: 12px;
+            transition: border-color 0.2s ease;
+        }
+
+        .form-input:focus, select:focus, textarea:focus {
+            outline: none;
+            border-color: rgba(6, 182, 212, 0.4);
+        }
+
+        textarea {
+            resize: vertical;
+            min-height: 100px;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        /* Button styles */
+        .btn {
+            background: transparent;
+            border: 1px solid var(--border-color);
+            color: #fff;
+            padding: 8px 16px;
+            font-size: 12px;
+            font-weight: 600;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+
+        .btn:hover {
+            background: rgba(255,255,255,0.03);
+            border-color: rgba(255,255,255,0.1);
+        }
+
+        .btn-primary {
+            background: var(--color-cyan);
+            border-color: var(--color-cyan);
+            color: #0d0f14;
+        }
+
+        .btn-primary:hover {
+            background: #22d3ee;
+            border-color: #22d3ee;
+            box-shadow: 0 0 10px rgba(6, 182, 212, 0.3);
+        }
+
+        .btn-purple {
+            background: #a855f7;
+            border-color: #a855f7;
+            color: #fff;
+        }
+
+        .btn-purple:hover {
+            background: #c084fc;
+            border-color: #c084fc;
+            box-shadow: 0 0 10px rgba(168, 85, 247, 0.3);
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 8px;
+        }
+
+        /* Results Badges & Visualizers */
+        .status-badge {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+
+        .status-allow {
+            background: rgba(16, 185, 129, 0.15);
+            color: var(--color-allow);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+
+        .status-monitor {
+            background: rgba(245, 158, 11, 0.15);
+            color: var(--color-monitor);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+        }
+
+        .status-block {
+            background: rgba(239, 68, 68, 0.15);
+            color: var(--color-block);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+        }
+
+        /* Belief Vector Bar Chart */
+        .belief-container {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .belief-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .belief-label {
+            font-size: 11px;
+            font-weight: 600;
+            width: 80px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+        }
+
+        .belief-bar-bg {
+            flex: 1;
+            height: 8px;
+            background: rgba(255,255,255,0.03);
+            border-radius: 4px;
+            overflow: hidden;
+            border: 1px solid rgba(255,255,255,0.01);
+        }
+
+        .belief-bar-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .belief-val {
+            font-size: 11px;
+            font-weight: 700;
+            font-family: 'JetBrains Mono', monospace;
+            width: 45px;
+            text-align: right;
+        }
+
+        /* Toast notification */
+        .toast {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            background: #0f172a;
+            border: 1px solid rgba(16, 185, 129, 0.4);
+            border-radius: 6px;
+            padding: 12px 20px;
+            color: #fff;
+            font-size: 13px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            z-index: 1000;
+            display: none;
+            align-items: center;
+            gap: 8px;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="logo-section">
+            <div class="logo-glow"></div>
+            <span class="logo-text">PROJECT AIAIAI</span>
+            <span style="font-size:9px; background:rgba(6, 182, 212, 0.1); border:1px solid rgba(6, 182, 212, 0.2); color:var(--color-cyan); padding:2px 6px; border-radius:10px; font-weight:700; letter-spacing:0.05em;">GATEWAY</span>
+        </div>
+        <div class="nav-links">
+            <a href="/" class="nav-link">
+                <svg style="width:13px; height:13px; fill:currentColor;" viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
+                Real-Time Panel
+            </a>
+            <a href="/quarantine.html" class="nav-link">
+                <svg style="width:13px; height:13px; fill:currentColor;" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
+                Quarantine Queue
+            </a>
+            <a href="/playground.html" class="nav-link active">
+                <svg style="width:13px; height:13px; fill:currentColor;" viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-2 10h-4v4h-2v-4H7v-2h4V7h2v4h4v2z"/></svg>
+                OPA Playground
+            </a>
+            <a href="/flow.html" class="nav-link">
+                <svg style="width:13px; height:13px; fill:currentColor;" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+                File Explorer
+            </a>
+        </div>
+    </header>
+
+    <div class="workspace">
+        <!-- Left Pane: OPA Policy Rego Editor -->
+        <div class="pane">
+            <div class="pane-header">
+                <span class="pane-title">
+                    <svg style="width:14px; height:14px; fill:var(--color-cyan);" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
+                    OPA Rego Policy Editor
+                </span>
+                <div class="btn-group">
+                    <button class="btn" onclick="loadProductionPolicy()">Reset</button>
+                    <button class="btn btn-primary" onclick="publishPolicy()">Publish to Production</button>
+                </div>
+            </div>
+            <div id="editor-container"></div>
+        </div>
+
+        <!-- Right Pane: Sandboxed Simulator -->
+        <div class="pane">
+            <div class="pane-header" style="border-left: 1px solid var(--border-color);">
+                <span class="pane-title">
+                    <svg style="width:14px; height:14px; fill:var(--color-purple);" viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-4 6h-4v2h4v2h-4v2h4v2H9V7h6v2z"/></svg>
+                    Sandboxed Simulator Playground
+                </span>
+                <button class="btn btn-purple" onclick="runSandboxSimulation()">
+                    <svg style="width:13px; height:13px; fill:currentColor;" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                    Run Simulation
+                </button>
+            </div>
+            <div class="pane-body">
+                <!-- Mock Parameters Form -->
+                <div class="card">
+                    <div class="card-header">Mock Input parameters</div>
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Analyst Role</label>
+                            <select id="mock-role">
+                                <option value="user">User</option>
+                                <option value="developer">Developer</option>
+                                <option value="admin">Administrator</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Request Route Type</label>
+                            <select id="mock-route" onchange="toggleRouteFields()">
+                                <option value="chat">Chat Completion (/v1/chat/completions)</option>
+                                <option value="agent">Agent Tool Execution (/v1/agent/action)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div id="agent-fields" style="display:none; margin-bottom: 12px; border-top:1px solid rgba(255,255,255,0.03); padding-top:12px;">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Tool Name</label>
+                                <input type="text" id="mock-tool" class="form-input" placeholder="e.g. read_file, execute_bash_command">
+                            </div>
+                            <div class="form-group">
+                                <label>Client IP Address</label>
+                                <input type="text" id="mock-ip" class="form-input" placeholder="127.0.0.1" value="127.0.0.1">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label id="payload-label">Prompt Content / Custom Payload JSON</label>
+                        <textarea id="mock-payload" placeholder='{"messages": [{"role": "user", "content": "Hello, model!"}]}'></textarea>
+                    </div>
+                </div>
+
+                <!-- Simulation Trace Output -->
+                <div class="card" id="simulation-results-card" style="display:none;">
+                    <div class="card-header">Simulation Trace results</div>
+                    
+                    <div style="display:flex; flex-direction:column; gap:16px;">
+                        <!-- OPA Decision Row -->
+                        <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(255,255,255,0.02); padding:10px 14px; border-radius:6px; border:1px solid var(--border-color);">
+                            <div style="display:flex; flex-direction:column; gap:2px;">
+                                <span style="font-size:10px; font-weight:600; color:var(--text-muted); text-transform:uppercase;">OPA Decision</span>
+                                <span id="opa-reason" style="font-size:11px; font-weight:500;">Access allowed.</span>
+                            </div>
+                            <span id="opa-badge" class="status-badge status-allow">Allow</span>
+                        </div>
+
+                        <!-- Active Inference Metrics -->
+                        <div id="vfe-results-section" style="display:flex; flex-direction:column; gap:12px;">
+                            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
+                                <div style="background:rgba(255,255,255,0.02); padding:10px; border-radius:6px; border: 1px solid var(--border-color); display:flex; justify-content:space-between; align-items:center;">
+                                    <span style="font-size:10px; font-weight:600; color:var(--text-muted); text-transform:uppercase;">VFE Surprise</span>
+                                    <span id="vfe-score" style="font-size:13px; font-weight:700; font-family:'JetBrains Mono', monospace; color:var(--color-cyan);">0.00</span>
+                                </div>
+                                <div style="background:rgba(255,255,255,0.02); padding:10px; border-radius:6px; border: 1px solid var(--border-color); display:flex; justify-content:space-between; align-items:center;">
+                                    <span style="font-size:10px; font-weight:600; color:var(--text-muted); text-transform:uppercase;">Decided Action</span>
+                                    <span id="action-badge" class="status-badge status-allow">Allow</span>
+                                </div>
+                            </div>
+
+                            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
+                                <div style="background:rgba(255,255,255,0.02); padding:10px; border-radius:6px; border: 1px solid var(--border-color); display:flex; justify-content:space-between; align-items:center;">
+                                    <span style="font-size:10px; font-weight:600; color:var(--text-muted); text-transform:uppercase;">Observation Category</span>
+                                    <span id="obs-badge" style="font-size:11px; font-weight:700; color:#fff; text-transform:uppercase;">Safe</span>
+                                </div>
+                                <div style="background:rgba(255,255,255,0.02); padding:10px; border-radius:6px; border: 1px solid var(--border-color); display:flex; justify-content:space-between; align-items:center;">
+                                    <span style="font-size:10px; font-weight:600; color:var(--text-muted); text-transform:uppercase;">Leaky Accumulator / Theta</span>
+                                    <span id="leaky-theta" style="font-size:11px; font-weight:700; font-family:'JetBrains Mono', monospace;">0.00 / 4.95</span>
+                                </div>
+                            </div>
+
+                            <!-- Belief Chart -->
+                            <div class="belief-container" style="background:rgba(255,255,255,0.02); padding:12px 14px; border-radius:6px; border: 1px solid var(--border-color);">
+                                <span style="font-size:10px; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:4px;">Layer 2 Belief Vector</span>
+                                <div class="belief-row">
+                                    <span class="belief-label">Safe</span>
+                                    <div class="belief-bar-bg"><div id="belief-safe-bar" class="belief-bar-fill" style="background:#10b981; width:34%;"></div></div>
+                                    <span id="belief-safe-val" class="belief-val">0.34</span>
+                                </div>
+                                <div class="belief-row">
+                                    <span class="belief-label">Suspicious</span>
+                                    <div class="belief-bar-bg"><div id="belief-susp-bar" class="belief-bar-fill" style="background:#f59e0b; width:33%;"></div></div>
+                                    <span id="belief-susp-val" class="belief-val">0.33</span>
+                                </div>
+                                <div class="belief-row">
+                                    <span class="belief-label">Malicious</span>
+                                    <div class="belief-bar-bg"><div id="belief-mal-bar" class="belief-bar-fill" style="background:#ef4444; width:33%;"></div></div>
+                                    <span id="belief-mal-val" class="belief-val">0.33</span>
+                                </div>
+                            </div>
+
+                            <!-- Explainable AI Plain English Translation -->
+                            <div style="background:rgba(192, 132, 252, 0.05); border: 1px solid rgba(192, 132, 252, 0.15); padding: 12px 14px; border-radius:6px; display:flex; flex-direction:column; gap:4px;">
+                                <span style="font-size:10px; font-weight:700; color:#c084fc; text-transform:uppercase;">Explainable AI (XAI) Explanation</span>
+                                <span id="xai-explanation" style="font-size:11px; color:#e9d5ff; line-height:1.4;">Simulation result is loading.</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notification Toast -->
+    <div id="toast-notification" class="toast">
+        <svg style="width:16px; height:16px; fill:#10b981;" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+        <span id="toast-message">Success!</span>
+    </div>
+
+    <script>
+        let editor;
+
+        // Initialize Monaco Editor
+        require.config({ paths: { vs: 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.39.0/min/vs' } });
+        require(['vs/editor/editor.main'], function () {
+            // Register Rego Language Highlights
+            monaco.languages.register({ id: 'rego' });
+            monaco.languages.setMonarchTokensProvider('rego', {
+                keywords: [
+                    'package', 'import', 'default', 'allow', 'deny', 'not', 'some', 'as', 'with', 'else', 'contains', 'decision', 'reason_message'
+                ],
+                operators: [
+                    '=', '==', '!=', '<', '>', '<=', '>=', ':=', '+', '-', '*', '/', '%', '&', '|', '^'
+                ],
+                tokenizer: {
+                    root: [
+                        [/[a-z_$][\w$]*/, {
+                            cases: {
+                                '@keywords': 'keyword',
+                                '@default': 'identifier'
+                            }
+                        }],
+                        { include: '@whitespace' },
+                        [/[{}()\[\]]/, '@brackets'],
+                        [/[<>=\-+*/%&|^:=]+/, 'operator'],
+                        [/\d+/, 'number'],
+                        [/"([^"\\]|\\.)*"/, 'string'],
+                    ],
+                    whitespace: [
+                        [/[ \t\r\n]+/, 'white'],
+                        [/#.*/, 'comment'],
+                    ]
+                }
+            });
+
+            // Define custom VS-Dark theme variations
+            monaco.editor.defineTheme('regoTheme', {
+                base: 'vs-dark',
+                inherit: true,
+                rules: [
+                    { token: 'keyword', foreground: '06b6d4', fontStyle: 'bold' },
+                    { token: 'comment', foreground: '64748b' },
+                    { token: 'operator', foreground: 'f59e0b' },
+                    { token: 'string', foreground: '10b981' }
+                ],
+                colors: {
+                    'editor.background': '#131824',
+                    'editor.lineHighlightBackground': '#1e293b'
+                }
+            });
+
+            editor = monaco.editor.create(document.getElementById('editor-container'), {
+                value: 'package gateway.authz\n\ndefault allow = false\n\nallow {\n    not input.is_agent_route\n}',
+                language: 'rego',
+                theme: 'regoTheme',
+                fontSize: 12,
+                fontFamily: 'JetBrains Mono',
+                automaticLayout: true
+            });
+
+            loadProductionPolicy();
+        });
+
+        // Hide/Show agent fields based on selection
+        function toggleRouteFields() {
+            const route = document.getElementById("mock-route").value;
+            const agentFields = document.getElementById("agent-fields");
+            const payloadArea = document.getElementById("mock-payload");
+            const payloadLabel = document.getElementById("payload-label");
+
+            if (route === "agent") {
+                agentFields.style.display = "block";
+                payloadLabel.textContent = "Agent Input Parameters (JSON)";
+                payloadArea.value = '{\n    "tool": "execute_bash_command",\n    "args": {\n        "command": "cat /etc/passwd"\n    }\n}';
+            } else {
+                agentFields.style.display = "none";
+                payloadLabel.textContent = "Prompt Content / Custom Payload JSON";
+                payloadArea.value = '{\n    "messages": [\n        {\n            "role": "user",\n            "content": "Hello, model!"\n        }\n    ]\n}';
+            }
+        }
+
+        // Fetch production policy from backend
+        async function loadProductionPolicy() {
+            try {
+                const resp = await fetch("/api/playground/policy");
+                if (!resp.ok) throw new Error("Failed to fetch policy");
+                const text = await resp.text();
+                if (editor) {
+                    editor.setValue(text);
+                }
+            } catch(e) {
+                console.error("Error loading production policy:", e);
+            }
+        }
+
+        // Publish edited policy to production
+        async function publishPolicy() {
+            if (!editor) return;
+            const policyText = editor.getValue();
+
+            try {
+                const resp = await fetch("/api/policy", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/text" },
+                    body: policyText
+                });
+
+                if (!resp.ok) {
+                    const errText = await resp.text();
+                    throw new Error(errText || "Publish failed");
+                }
+
+                showToast("OPA/Rego Policy published successfully!");
+            } catch(e) {
+                alert(`Error publishing policy: ${e.message}`);
+            }
+        }
+
+        // Run sandboxed simulation
+        async function runSandboxSimulation() {
+            if (!editor) return;
+            
+            const policyRego = editor.getValue();
+            const role = document.getElementById("mock-role").value;
+            const routeType = document.getElementById("mock-route").value;
+            const tool = document.getElementById("mock-tool").value;
+            const ip = document.getElementById("mock-ip").value;
+            const rawPayload = document.getElementById("mock-payload").value;
+
+            // Construct simulation payload
+            let payloadJson;
+            try {
+                payloadJson = JSON.parse(rawPayload);
+            } catch(e) {
+                // If it's not valid JSON, treat it as raw text
+                payloadJson = { prompt: rawPayload };
+            }
+
+            const body = {
+                policy_rego: policyRego,
+                role: role,
+                is_agent_route: (routeType === "agent"),
+                tool: tool,
+                client_ip: ip,
+                payload: payloadJson
+            };
+
+            const resultsCard = document.getElementById("simulation-results-card");
+            resultsCard.style.display = "block";
+            resultsCard.scrollIntoView({ behavior: 'smooth' });
+
+            try {
+                const resp = await fetch("/api/playground/simulate", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(body)
+                });
+
+                if (!resp.ok) {
+                    const err = await resp.text();
+                    throw new Error(err);
+                }
+
+                const trace = await resp.json();
+
+                // Update OPA results
+                const opaBadge = document.getElementById("opa-badge");
+                const opaReason = document.getElementById("opa-reason");
+                opaBadge.className = `status-badge ${trace.opa.allow ? 'status-allow' : 'status-block'}`;
+                opaBadge.textContent = trace.opa.allow ? "Allow" : "Block";
+                opaReason.textContent = trace.opa.reason;
+
+                // Update Active Inference results
+                const vfeSection = document.getElementById("vfe-results-section");
+                if (trace.vfe) {
+                    vfeSection.style.display = "flex";
+                    document.getElementById("vfe-score").textContent = trace.vfe.vfe_score.toFixed(4);
+                    
+                    const actionBadge = document.getElementById("action-badge");
+                    actionBadge.className = `status-badge status-${trace.vfe.decided_action.toLowerCase()}`;
+                    actionBadge.textContent = trace.vfe.decided_action;
+
+                    document.getElementById("obs-badge").textContent = trace.vfe.observation;
+                    document.getElementById("leaky-theta").textContent = `${trace.vfe.leaky_vfe.toFixed(3)} / ${trace.vfe.theta.toFixed(2)}`;
+
+                    // Update beliefs
+                    const beliefs = trace.vfe.beliefs;
+                    if (beliefs && beliefs.length === 3) {
+                        const safePct = (beliefs[0]*100).toFixed(1);
+                        const suspPct = (beliefs[1]*100).toFixed(1);
+                        const malPct = (beliefs[2]*100).toFixed(1);
+
+                        document.getElementById("belief-safe-val").textContent = beliefs[0].toFixed(3);
+                        document.getElementById("belief-safe-bar").style.width = `${safePct}%`;
+
+                        document.getElementById("belief-susp-val").textContent = beliefs[1].toFixed(3);
+                        document.getElementById("belief-susp-bar").style.width = `${suspPct}%`;
+
+                        document.getElementById("belief-mal-val").textContent = beliefs[2].toFixed(3);
+                        document.getElementById("belief-mal-bar").style.width = `${malPct}%`;
+                    }
+
+                    document.getElementById("xai-explanation").textContent = trace.vfe.explanation;
+                } else {
+                    vfeSection.style.display = "none";
+                }
+
+            } catch(e) {
+                document.getElementById("opa-badge").className = "status-badge status-block";
+                document.getElementById("opa-badge").textContent = "Error";
+                document.getElementById("opa-reason").textContent = `Simulation Failed: ${e.message}`;
+                document.getElementById("vfe-results-section").style.display = "none";
+            }
+        }
+
+        function showToast(message) {
+            const toast = document.getElementById("toast-notification");
+            document.getElementById("toast-message").textContent = message;
+            toast.style.display = "flex";
+            setTimeout(() => {
+                toast.style.display = "none";
+            }, 3500);
+        }
+
+        // Initialize view with standard values
+        toggleRouteFields();
+    </script>
+</body>
+</html>
