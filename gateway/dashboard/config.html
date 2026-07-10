@@ -621,6 +621,45 @@
                 </div>
             </div>
 
+            <!-- Part 5.5: G1163RT SIEM & Logging Integrations -->
+            <div>
+                <div class="card-title">
+                    <span>SIEM & Logging Integrations</span>
+                    <span class="section-tag tag-cyan">COMPLIANCE METRICS</span>
+                </div>
+                <div style="display:flex; flex-direction:column; gap:16px;">
+                    <div>
+                        <span style="font-size:11px; font-weight:700; color:var(--color-magenta)">SIEM PROVIDER PIPELINE</span>
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:8px;">
+                            <div class="form-group">
+                                <label class="form-label">Active Provider</label>
+                                <select id="siem-provider" class="form-input" style="background:#0f172a;" onchange="loadSIEMConfig(this.value)">
+                                    <option value="datadog">Datadog Exporter</option>
+                                    <option value="splunk">Splunk HEC Exporter</option>
+                                </select>
+                            </div>
+                            <div class="form-group" style="display:flex; align-items:center; gap:8px; margin-top:28px;">
+                                <input type="checkbox" id="siem-active" style="width:18px; height:18px; cursor:pointer;">
+                                <label for="siem-active" style="font-size:12px; font-weight:600; cursor:pointer;">Enable SIEM Stream</label>
+                            </div>
+                            <div class="form-group full-width">
+                                <label class="form-label">SIEM Collector Endpoint URL</label>
+                                <input type="text" id="siem-url" class="form-input" placeholder="e.g. https://http-intake.logs.datadoghq.com/v1/input">
+                            </div>
+                            <div class="form-group full-width">
+                                <label class="form-label">Collector Auth Token / API Key</label>
+                                <input type="password" id="siem-token" class="form-input" placeholder="Enter API key or auth token">
+                            </div>
+                        </div>
+                        <div style="margin-top:12px; display:flex; justify-content:flex-end;">
+                            <button class="btn-back" onclick="saveSIEMConfig()" style="border-color:var(--color-cyan); color:var(--color-cyan); font-weight:600; cursor:pointer; background: transparent;">
+                                Save SIEM Configuration
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Part 6: Rogue Agent Fleet Authorization Panel -->
             <div>
                 <div class="card-title">
@@ -847,12 +886,57 @@
                 document.getElementById("dup-window").value = windowVal;
                 document.getElementById("dup-window-display").innerText = windowVal + " ms";
 
-                const limitVal = status.deduplicate_limit || 2;
+                 const limitVal = status.deduplicate_limit || 2;
                 document.getElementById("dup-limit").value = limitVal;
                 document.getElementById("dup-limit-display").innerText = limitVal;
 
+                // Load G1163RT SIEM configuration
+                await loadSIEMConfig("datadog");
+
             } catch (e) {
                 console.error("Failed to load configs", e);
+            }
+        }
+
+        async function loadSIEMConfig(provider) {
+            try {
+                const r = await fetch(`/api/siem/config?provider=${provider}`);
+                if (!r.ok) return;
+                const cfg = await r.json();
+                document.getElementById("siem-url").value = cfg.endpoint_url || "";
+                document.getElementById("siem-token").value = cfg.auth_token || "";
+                document.getElementById("siem-active").checked = cfg.is_active || false;
+                document.getElementById("siem-provider").value = provider;
+            } catch (err) {
+                console.error("Failed to load SIEM config:", err);
+            }
+        }
+
+        async function saveSIEMConfig() {
+            const provider = document.getElementById("siem-provider").value;
+            const url = document.getElementById("siem-url").value;
+            const token = document.getElementById("siem-token").value;
+            const active = document.getElementById("siem-active").checked;
+
+            try {
+                const r = await fetch("/api/siem/config", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        provider: provider,
+                        endpoint_url: url,
+                        auth_token: token,
+                        is_active: active
+                    })
+                });
+                if (r.ok) {
+                    alert("SIEM Configuration Saved Successfully!");
+                } else {
+                    alert("Failed to save SIEM Configuration");
+                }
+            } catch (err) {
+                console.error("Error saving SIEM config:", err);
+                alert("Error saving SIEM config: " + err);
             }
         }
 

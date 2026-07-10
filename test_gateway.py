@@ -214,6 +214,61 @@ def test_cso_detailed_trigger_extraction():
         
     assert blocked, "Prompt injection request was not blocked."
 
+def test_quarantine_block_and_release():
+    print("\n--- 9. Testing Session Quarantine (BLOCK + RELEASE WORKFLOW) ---")
+    session_id = str(uuid.uuid4())
+    headers = {
+        "Content-Type": "application/json",
+        "X-Session-ID": session_id
+    }
+    
+    payload = {
+        "model": "gpt-4",
+        "messages": [{"role": "user", "content": "Hello! How are you?"}]
+    }
+    resp = requests.post(f"{BASE_URL}/v1/chat/completions", headers=headers, json=payload)
+    print(f"Initial Request - Status Code: {resp.status_code}")
+    assert resp.status_code == 200, "Initial request should succeed"
+
+    payload_bad = {
+        "model": "gpt-4",
+        "messages": [{"role": "user", "content": "My card number is 4111-2222-3333-4444. Can you process it?"}]
+    }
+    
+    blocked = False
+    for i in range(3):
+        resp_bad = requests.post(f"{BASE_URL}/v1/chat/completions", headers=headers, json=payload_bad)
+        print(f"Trigger Bad Request {i+1} - Status Code: {resp_bad.status_code}")
+        if resp_bad.status_code == 403:
+            blocked = True
+            break
+        time.sleep(0.5)
+        
+    assert blocked, "Bad request should be blocked"
+    
+    resp_sub = requests.post(f"{BASE_URL}/v1/chat/completions", headers=headers, json=payload)
+    print(f"Subsequent Request (Quarantined) - Status Code: {resp_sub.status_code}")
+    assert resp_sub.status_code == 403, "Subsequent requests should be blocked by quarantine"
+    assert "quarantined pending security analyst review" in resp_sub.json().get("blocked_reason", "")
+
+    resp_list = requests.get(f"{BASE_URL}/api/quarantine/list")
+    assert resp_list.status_code == 200
+    items = resp_list.json()
+    session_ids = [item["session_id"] for item in items]
+    assert session_id in session_ids, "Session should be registered in quarantine queue"
+
+    resp_act = requests.post(f"{BASE_URL}/api/quarantine/action", json={
+        "session_id": session_id,
+        "action": "APPROVE"
+    })
+    print(f"Approve Action - Status Code: {resp_act.status_code}")
+    assert resp_act.status_code == 200
+
+    resp_released = requests.post(f"{BASE_URL}/v1/chat/completions", headers=headers, json=payload)
+    print(f"Released Request - Status Code: {resp_released.status_code}")
+    assert resp_released.status_code == 200, "Released session request should succeed"
+    print("SUCCESS")
+
 if __name__ == "__main__":
     print("Starting Project AIAIAI Test Suite...")
     # Pause active simulator and reset database to ensure clean, isolated testing environment
@@ -232,6 +287,7 @@ if __name__ == "__main__":
         test_pii_block()
         test_pii_redaction_rehydration_pipeline()
         test_cso_detailed_trigger_extraction()
+        test_quarantine_block_and_release()
         print("\n=== ALL TESTS PASSED SUCCESSFULLY ===")
     except Exception as e:
         print(f"\n=== TEST SUITE FAILED ===\nError: {e}")

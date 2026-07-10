@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -154,6 +155,9 @@ func main() {
 		mux1.HandleFunc("/api/agents/loop/stop", handleAPIAgentLoopStop)
 		mux1.HandleFunc("/api/forensics", handleAPIGetForensics)
 		mux1.HandleFunc("/api/forensics/drilldown", handleAPIGetForensicsDrilldown)
+		mux1.HandleFunc("/api/siem/config", handleAPISIEMConfig)
+		mux1.HandleFunc("/api/quarantine/list", handleAPIQuarantineList)
+		mux1.HandleFunc("/api/quarantine/action", handleAPIQuarantineAction)
 		mux1.HandleFunc("/flow.html", handleFlowPage)
 		mux1.HandleFunc("/", handleDashboard)
 
@@ -177,6 +181,9 @@ func main() {
 	mux2.HandleFunc("/api/agents/loop/stop", handleAPIAgentLoopStop)
 	mux2.HandleFunc("/api/forensics", handleAPIGetForensics)
 	mux2.HandleFunc("/api/forensics/drilldown", handleAPIGetForensicsDrilldown)
+	mux2.HandleFunc("/api/siem/config", handleAPISIEMConfig)
+	mux2.HandleFunc("/api/quarantine/list", handleAPIQuarantineList)
+	mux2.HandleFunc("/api/quarantine/action", handleAPIQuarantineAction)
 	mux2.HandleFunc("/flow.html", handleFlowPage)
 
 	log.Printf("Go Configuration Portal listening on 0.0.0.0:1163...")
@@ -290,6 +297,21 @@ func handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if sessionID == "" {
 		sessionID = uuid.New().String()
 	}
+
+	quarantined, qErr := IsSessionQuarantined(sessionID)
+	if qErr != nil {
+		log.Printf("[Error] Failed to check session quarantine status: %v", qErr)
+	}
+	if quarantined {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(map[string]string{
+			"blocked_reason": "Blocked: Session has been quarantined pending security analyst review.",
+			"error":          "Security Block: G1163RT Session Quarantine",
+		})
+		return
+	}
+
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -562,6 +584,9 @@ func handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 
 	if decidedAction == ACTION_BLOCK {
 		blockedReason := generateDetailedBlockReason(body, obs, false)
+		if err := QuarantineSession(sessionID, blockedReason); err != nil {
+			log.Printf("[Error] Failed to quarantine session: %v", err)
+		}
 		respJSON, _ := json.Marshal(map[string]interface{}{
 			"error":          fmt.Sprintf("Security Block: Active Inference detected policy violation (VFE: %.4f)", vfe),
 			"blocked_reason": blockedReason,
@@ -644,6 +669,21 @@ func handleAgentAction(w http.ResponseWriter, r *http.Request) {
 	if sessionID == "" {
 		sessionID = uuid.New().String()
 	}
+
+	quarantined, qErr := IsSessionQuarantined(sessionID)
+	if qErr != nil {
+		log.Printf("[Error] Failed to check session quarantine status: %v", qErr)
+	}
+	if quarantined {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(map[string]string{
+			"blocked_reason": "Blocked: Session has been quarantined pending security analyst review.",
+			"error":          "Security Block: G1163RT Session Quarantine",
+		})
+		return
+	}
+
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -912,6 +952,9 @@ func handleAgentAction(w http.ResponseWriter, r *http.Request) {
 
 	if decidedAction == ACTION_BLOCK {
 		blockedReason := generateDetailedBlockReason(body, obs, true)
+		if err := QuarantineSession(sessionID, blockedReason); err != nil {
+			log.Printf("[Error] Failed to quarantine session: %v", err)
+		}
 		respJSON, _ := json.Marshal(map[string]interface{}{
 			"error":          fmt.Sprintf("Security Block: Active Inference blocked agent tool execution (VFE: %.4f)", vfe),
 			"blocked_reason": blockedReason,
@@ -2559,3 +2602,143 @@ func injectTraceAndWrite(w http.ResponseWriter, trace *map[string]interface{}, r
 	}
 	w.Write(respBytes)
 }
+
+func handleAPISIEMConfig(w http.ResponseWriter, r *http.Request) {
+	if setupCORSHeaders(w, r) {
+		return
+	}
+	if r.Method == http.MethodGet {
+		provider := r.URL.Query().Get("provider")
+		if provider == "" {
+			provider = "datadog"
+		}
+		cfg, err := GetSIEMConfig(provider)
+		if err != nil {
+			log.Printf("[Error] Failed to fetch SIEM config: %v", err)
+			http.Error(w, "Database error", http.StatusInternalServerError)
+			return
+		}
+		if cfg == nil {
+			cfg = &SIEMConfig{
+				Provider:    provider,
+				EndpointURL: "",
+				AuthToken:   "",
+				IsActive:    false,
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(cfg)
+		return
+	}
+
+	if r.Method == http.MethodPost {
+		var cfg SIEMConfig
+		if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+			http.Error(w, "Bad Request", http.StatusBadRequest)
+			return
+		}
+		if err := SaveSIEMConfig(&cfg); err != nil {
+			log.Printf("[Error] Failed to save SIEM config: %v", err)
+			http.Error(w, "Database error", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "SUCCESS"})
+		return
+	}
+
+	http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+}
+
+type QuarantineItem struct {
+	SessionID     string        `json:"session_id"`
+	Status        string        `json:"status"`
+	Reason        string        `json:"reason"`
+	QuarantinedAt time.Time     `json:"quarantined_at"`
+	DecidedAt     *time.Time    `json:"decided_at"`
+	LastPayload   PayloadDetail `json:"last_payload"`
+}
+
+func handleAPIQuarantineList(w http.ResponseWriter, r *http.Request) {
+	if setupCORSHeaders(w, r) {
+		return
+	}
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	items := []QuarantineItem{}
+	if DB != nil {
+		rows, err := DB.Query(`
+			SELECT session_id, status, reason, quarantined_at, decided_at 
+			FROM session_quarantine 
+			ORDER BY quarantined_at DESC
+		`)
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var item QuarantineItem
+				var decidedVal sql.NullTime
+				if rows.Scan(&item.SessionID, &item.Status, &item.Reason, &item.QuarantinedAt, &decidedVal) == nil {
+					if decidedVal.Valid {
+						item.DecidedAt = &decidedVal.Time
+					}
+					val, ok := sessionCache.Load(item.SessionID)
+					if ok {
+						state := val.(*ActiveInfState)
+						if len(state.HistoryPayloads) > 0 {
+							item.LastPayload = state.HistoryPayloads[len(state.HistoryPayloads)-1]
+						}
+					}
+					items = append(items, item)
+				}
+			}
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(items)
+}
+
+func handleAPIQuarantineAction(w http.ResponseWriter, r *http.Request) {
+	if setupCORSHeaders(w, r) {
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		SessionID string `json:"session_id"`
+		Action    string `json:"action"` // "APPROVE" or "REJECT"
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
+
+	approved := req.Action == "APPROVE"
+	if err := ResolveQuarantine(req.SessionID, approved); err != nil {
+		log.Printf("[Error] Failed to resolve quarantine: %v", err)
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+
+	if approved {
+		val, ok := sessionCache.Load(req.SessionID)
+		if ok {
+			state := val.(*ActiveInfState)
+			state.Lock()
+			state.LeakyVFE = 0.0
+			state.CurrentAction = ACTION_ALLOW
+			state.Unlock()
+			StoreSessionState(req.SessionID, state)
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "SUCCESS"})
+}
+

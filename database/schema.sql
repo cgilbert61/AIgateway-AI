@@ -40,3 +40,21 @@ CREATE TRIGGER trg_notify_runtime_inference_state
 AFTER INSERT ON runtime_inference_state
 FOR EACH ROW
 EXECUTE FUNCTION notify_runtime_inference_state();
+
+-- Session quarantine registry for manual accept/reject workflow
+CREATE TABLE IF NOT EXISTS session_quarantine (
+    session_id VARCHAR(255) PRIMARY KEY,
+    status VARCHAR(30) DEFAULT 'QUARANTINED',
+    reason VARCHAR(255) DEFAULT '',
+    quarantined_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    decided_at TIMESTAMP WITH TIME ZONE
+);
+
+-- Configurable SIEM pipeline credentials
+CREATE TABLE IF NOT EXISTS siem_config (
+    provider VARCHAR(50) PRIMARY KEY,
+    endpoint_url VARCHAR(255) NOT NULL,
+    auth_token VARCHAR(255) NOT NULL,
+    is_active BOOLEAN DEFAULT FALSE
+);
+

@@ -922,6 +922,7 @@
                     <button class="tab-btn" id="tab-btn-cso" onclick="switchTab('cso')">CSO Translation Forensics</button>
                     <button class="tab-btn" id="tab-btn-health" onclick="switchTab('health')">System Backend Health</button>
                     <button class="tab-btn" id="tab-btn-forensics" onclick="switchTab('forensics')">Agent Forensics</button>
+                    <button class="tab-btn" id="tab-btn-quarantine" onclick="switchTab('quarantine')" style="border-color: rgba(245, 158, 11, 0.4); color: #fbbf24;"><span>⚠️ Quarantine Workspace</span></button>
                 </div>
 
                 <!-- Tab 1: Matrices -->
@@ -1072,6 +1073,59 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- Tab 6: G1163RT Quarantine Workspace -->
+                <div class="tab-content-panel" id="tab-content-quarantine" style="overflow-y: auto;">
+                    <div style="padding: 16px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+                            <div style="font-size:14px; font-weight:700; color:var(--text-main); display:flex; align-items:center; gap:8px;">
+                                <span style="display:inline-block; width:8px; height:8px; background:#f59e0b; border-radius:50%; box-shadow: 0 0 8px #f59e0b;"></span>
+                                G1163RT Incident Quarantine Review Workspace
+                            </div>
+                            <button class="btn" onclick="loadQuarantineQueueData()" style="height:28px; font-size:11px; padding: 4px 10px; cursor: pointer; border-color: rgba(245,158,11,0.4); color: #fbbf24; background: transparent;">
+                                Refresh Incidents
+                            </button>
+                        </div>
+                        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:20px;">
+                            <!-- Left: Incident List -->
+                            <div class="glass-panel" style="padding: 16px; background: rgba(17, 24, 39, 0.4); max-height: 480px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 6px;">
+                                <div style="font-size:11px; font-weight:700; color:var(--text-muted); margin-bottom:12px; border-bottom:1px solid rgba(255,255,255,0.05); padding-bottom:6px; letter-spacing: 0.05em;">
+                                    PENDING SECURITY QUARANTINES
+                                </div>
+                                <div id="quarantine-list-container" style="display:flex; flex-direction:column; gap:8px;">
+                                    <!-- Populated dynamically -->
+                                    <div style="text-align:center; padding:40px; color:var(--text-muted); font-size:12px;">
+                                        Loading quarantine queue...
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Right: Detailed Diff view -->
+                            <div class="glass-panel" id="quarantine-detail-panel" style="padding: 16px; background: rgba(17, 24, 39, 0.4); display: none; flex-direction: column; gap: 12px; border: 1px solid var(--border-color); border-radius: 6px;">
+                                <div style="font-size:11px; font-weight:700; color:var(--text-muted); border-bottom:1px solid rgba(255,255,255,0.05); padding-bottom:6px; display:flex; justify-content:space-between; letter-spacing: 0.05em;">
+                                    <span>INCIDENT INVESTIGATION</span>
+                                    <span id="quarantine-detail-session" style="color:var(--color-allow);"></span>
+                                </div>
+                                <div style="display:flex; flex-direction:column; gap:6px; font-size:12px; line-height: 1.4;">
+                                    <div><strong>Quarantined At:</strong> <span id="quarantine-detail-time" style="color:var(--text-main);"></span></div>
+                                    <div><strong>Breach Reason:</strong> <span id="quarantine-detail-reason" style="color:#f87171; font-weight: 600;"></span></div>
+                                </div>
+                                <div style="display:flex; flex-direction:column; gap:6px; font-size:11px; flex-grow: 1;">
+                                    <strong style="color:var(--text-muted); letter-spacing: 0.05em;">VIOLATING PAYLOAD CONTENT:</strong>
+                                    <textarea id="quarantine-detail-payload" readonly style="width:100%; height:200px; background:rgba(0,0,0,0.4); border:1px solid rgba(255,255,255,0.05); border-radius:4px; color:#e2e8f0; font-family:'JetBrains Mono',monospace; padding:10px; font-size:11px; resize:none; outline:none; line-height:1.4;"></textarea>
+                                </div>
+                                <div style="display:flex; gap:12px; justify-content:flex-end; margin-top:8px;">
+                                    <button class="btn" id="btn-quarantine-reject" onclick="actOnQuarantine('REJECT')" style="background:rgba(239,68,68,0.15); border-color:rgba(239,68,68,0.4); color:#f87171; height:32px; font-weight:600; cursor:pointer;">
+                                        Permanently Block
+                                    </button>
+                                    <button class="btn" id="btn-quarantine-approve" onclick="actOnQuarantine('APPROVE')" style="background:rgba(16,185,129,0.15); border-color:rgba(16,185,129,0.4); color:#34d399; height:32px; font-weight:600; cursor:pointer;">
+                                        Approve & Release
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -1116,6 +1170,127 @@
 
             if (tab === "forensics") {
                 loadForensicsData();
+            } else if (tab === "quarantine") {
+                loadQuarantineQueueData();
+            }
+        }
+
+        let activeQuarantineSession = null;
+
+        async function loadQuarantineQueueData() {
+            const container = document.getElementById("quarantine-list-container");
+            try {
+                const r = await fetch("/api/quarantine/list");
+                if (!r.ok) return;
+                const items = await r.json();
+                
+                container.innerHTML = "";
+                if (items.length === 0) {
+                    container.innerHTML = `
+                        <div style="text-align:center; padding:40px; color:var(--text-muted); font-size:12px;">
+                            No incidents currently in queue.
+                        </div>
+                    `;
+                    document.getElementById("quarantine-detail-panel").style.display = "none";
+                    activeQuarantineSession = null;
+                    return;
+                }
+
+                items.forEach(item => {
+                    const statusColor = item.status === "QUARANTINED" ? "#fbbf24" : (item.status === "APPROVED" ? "#34d399" : "#f87171");
+                    const card = document.createElement("div");
+                    card.style.cssText = `
+                        padding: 10px 12px;
+                        background: rgba(255,255,255,0.02);
+                        border: 1px solid rgba(255,255,255,0.05);
+                        border-radius: 4px;
+                        cursor: pointer;
+                        transition: all 0.2s;
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                        font-size: 12px;
+                    `;
+                    if (activeQuarantineSession === item.session_id) {
+                        card.style.borderColor = "#fbbf24";
+                        card.style.background = "rgba(245,158,11,0.05)";
+                    }
+                    card.innerHTML = `
+                        <div>
+                            <div style="font-weight:600; color:var(--text-main);">${item.session_id}</div>
+                            <div style="font-size:10px; color:var(--text-muted); margin-top:2px;">
+                                ${new Date(item.quarantined_at).toLocaleTimeString()}
+                            </div>
+                        </div>
+                        <div style="font-size:10px; font-weight:700; color:${statusColor}; border:1px solid ${statusColor}44; background:${statusColor}11; padding:2px 6px; border-radius:3px;">
+                            ${item.status}
+                        </div>
+                    `;
+                    card.onclick = () => selectQuarantineIncident(item);
+                    container.appendChild(card);
+                });
+            } catch (err) {
+                console.error("Failed to fetch quarantine list:", err);
+            }
+        }
+
+        function selectQuarantineIncident(item) {
+            activeQuarantineSession = item.session_id;
+            
+            // Re-render items to draw selection border
+            const container = document.getElementById("quarantine-list-container");
+            document.querySelectorAll("#quarantine-list-container > div").forEach(div => {
+                const headerText = div.querySelector("div > div").innerText;
+                if (headerText === item.session_id) {
+                    div.style.borderColor = "#fbbf24";
+                    div.style.background = "rgba(245,158,11,0.05)";
+                } else {
+                    div.style.borderColor = "rgba(255,255,255,0.05)";
+                    div.style.background = "rgba(255,255,255,0.02)";
+                }
+            });
+
+            const panel = document.getElementById("quarantine-detail-panel");
+            panel.style.display = "flex";
+
+            document.getElementById("quarantine-detail-session").innerText = item.session_id;
+            document.getElementById("quarantine-detail-time").innerText = new Date(item.quarantined_at).toLocaleString();
+            document.getElementById("quarantine-detail-reason").innerText = item.reason || "Active Inference VFE threshold breach";
+            
+            let payloadText = "No payload recorded in cache.";
+            if (item.last_payload && item.last_payload.raw_request) {
+                try {
+                    const parsed = JSON.parse(item.last_payload.raw_request);
+                    payloadText = JSON.stringify(parsed, null, 2);
+                } catch (e) {
+                    payloadText = item.last_payload.raw_request;
+                }
+            }
+            document.getElementById("quarantine-detail-payload").value = payloadText;
+
+            const isQuarantined = item.status === "QUARANTINED";
+            document.getElementById("btn-quarantine-approve").disabled = !isQuarantined;
+            document.getElementById("btn-quarantine-reject").disabled = !isQuarantined;
+            document.getElementById("btn-quarantine-approve").style.opacity = isQuarantined ? "1" : "0.5";
+            document.getElementById("btn-quarantine-reject").style.opacity = isQuarantined ? "1" : "0.5";
+        }
+
+        async function actOnQuarantine(action) {
+            if (!activeQuarantineSession) return;
+            try {
+                const r = await fetch("/api/quarantine/action", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        session_id: activeQuarantineSession,
+                        action: action
+                    })
+                });
+                if (r.ok) {
+                    loadQuarantineQueueData();
+                }
+            } catch (err) {
+                console.error("Quarantine action failed:", err);
             }
         }
 

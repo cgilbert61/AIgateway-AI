@@ -1,5 +1,7 @@
-- [x] Implement simulation manager and REST endpoints in `gateway/main.go`
-- [x] Implement `dispatchSimRequest` with mixed traffic profiles in `gateway/main.go`
-- [x] Integrate "Start 1000-Worker Sim" button and JS logic in `gateway/dashboard/index.html`
-- [x] Rebuild and restart docker containers to apply simulator changes
-- [x] Verify execution from the dashboard and monitor the results
+- [ ] Update PostgreSQL schema with quarantine status and SIEM configuration table
+- [ ] Add G1163RT Quarantine database helper functions in `gateway/db.go`
+- [ ] Integrate quarantine check and HTTP 403 response in `handleChatCompletions` and `handleAgentAction`
+- [ ] Add API endpoints for SIEM config (`/api/siem/config`), Quarantine list (`/api/quarantine/list`), and Quarantine actions (`/api/quarantine/action`)
+- [ ] Design and build G1163RT Quarantine Workspace UI and SIEM Integrations menu in `gateway/dashboard/index.html` and `gateway/dashboard/config.html`
+- [ ] Add manual verification tests in `test_gateway.py` to assert quarantine block and release behaviors
+- [ ] Rebuild and restart Docker Compose containers, then run tests to verify everything is green

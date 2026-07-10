@@ -140,6 +140,23 @@ func InitDB() {
 						reason VARCHAR(255) NOT NULL
 					)
 				`)
+				_, _ = DB.Exec(`
+					CREATE TABLE IF NOT EXISTS session_quarantine (
+						session_id VARCHAR(255) PRIMARY KEY,
+						status VARCHAR(30) DEFAULT 'QUARANTINED',
+						reason VARCHAR(255) DEFAULT '',
+						quarantined_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+						decided_at TIMESTAMP WITH TIME ZONE
+					)
+				`)
+				_, _ = DB.Exec(`
+					CREATE TABLE IF NOT EXISTS siem_config (
+						provider VARCHAR(50) PRIMARY KEY,
+						endpoint_url VARCHAR(255) NOT NULL,
+						auth_token VARCHAR(255) NOT NULL,
+						is_active BOOLEAN DEFAULT FALSE
+					)
+				`)
 				break
 			}
 		}
@@ -555,4 +572,80 @@ func LogForensicEventAsync(fId, ip, key, ua, payload, rsn string) {
 		}
 	})
 }
+
+func IsSessionQuarantined(sessionID string) (bool, error) {
+	if DB == nil {
+		return false, nil
+	}
+	var status string
+	err := DB.QueryRow("SELECT status FROM session_quarantine WHERE session_id = $1", sessionID).Scan(&status)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+		return false, err
+	}
+	return status == "QUARANTINED", nil
+}
+
+func QuarantineSession(sessionID string, reason string) error {
+	if DB == nil {
+		return nil
+	}
+	_, err := DB.Exec(`
+		INSERT INTO session_quarantine (session_id, status, reason, quarantined_at, decided_at)
+		VALUES ($1, 'QUARANTINED', $2, NOW(), NULL)
+		ON CONFLICT (session_id) DO UPDATE SET status = 'QUARANTINED', reason = $2, quarantined_at = NOW(), decided_at = NULL
+	`, sessionID, reason)
+	return err
+}
+
+func ResolveQuarantine(sessionID string, approved bool) error {
+	if DB == nil {
+		return nil
+	}
+	status := "REJECTED"
+	if approved {
+		status = "APPROVED"
+	}
+	_, err := DB.Exec(`
+		UPDATE session_quarantine SET status = $1, decided_at = NOW() WHERE session_id = $2
+	`, status, sessionID)
+	return err
+}
+
+type SIEMConfig struct {
+	Provider    string `json:"provider"`
+	EndpointURL string `json:"endpoint_url"`
+	AuthToken   string `json:"auth_token"`
+	IsActive    bool   `json:"is_active"`
+}
+
+func GetSIEMConfig(provider string) (*SIEMConfig, error) {
+	if DB == nil {
+		return nil, nil
+	}
+	var cfg SIEMConfig
+	err := DB.QueryRow("SELECT provider, endpoint_url, auth_token, is_active FROM siem_config WHERE provider = $1", provider).Scan(&cfg.Provider, &cfg.EndpointURL, &cfg.AuthToken, &cfg.IsActive)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &cfg, nil
+}
+
+func SaveSIEMConfig(cfg *SIEMConfig) error {
+	if DB == nil {
+		return nil
+	}
+	_, err := DB.Exec(`
+		INSERT INTO siem_config (provider, endpoint_url, auth_token, is_active)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (provider) DO UPDATE SET endpoint_url = $2, auth_token = $3, is_active = $4
+	`, cfg.Provider, cfg.EndpointURL, cfg.AuthToken, cfg.IsActive)
+	return err
+}
+
 
