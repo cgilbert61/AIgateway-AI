@@ -1792,7 +1792,7 @@ func handleAPISystemReset(w http.ResponseWriter, r *http.Request) {
 
 	// 1. Truncate runtime logs and forensics tables in DB and reset metrics
 	if DB != nil {
-		_, err := DB.Exec("TRUNCATE TABLE runtime_inference_state, agent_forensic_log, entity_historical_surprise")
+		_, err := DB.Exec("TRUNCATE TABLE runtime_inference_state, agent_forensic_log, entity_historical_surprise, session_quarantine")
 		if err != nil {
 			log.Printf("[Error] Failed to truncate database tables: %v", err)
 			http.Error(w, "Failed to clear database logs: "+err.Error(), http.StatusInternalServerError)
