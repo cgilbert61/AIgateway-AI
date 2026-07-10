@@ -306,6 +306,9 @@ func handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[Error] Failed to check session quarantine status: %v", qErr)
 	}
 	if quarantined {
+		txID := uuid.New().String()
+		LogTransactionStateAsync(txID, sessionID, OBS_INPUT_ERROR, 0.0, 0.0, 0.0, true)
+
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)
 		json.NewEncoder(w).Encode(map[string]string{
@@ -678,6 +681,9 @@ func handleAgentAction(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[Error] Failed to check session quarantine status: %v", qErr)
 	}
 	if quarantined {
+		txID := uuid.New().String()
+		LogTransactionStateAsync(txID, sessionID, OBS_INPUT_ERROR, 0.0, 0.0, 0.0, true)
+
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)
 		json.NewEncoder(w).Encode(map[string]string{
@@ -1852,6 +1858,7 @@ func handleAPISystemReset(w http.ResponseWriter, r *http.Request) {
 		authorizedKeysCache.Delete(key)
 		return true
 	})
+	ClearQuarantineCache()
 
 	log.Println("[System] Entire active inference gateway state cache reset and database logs truncated.")
 
@@ -1892,8 +1899,9 @@ func handleAPISessionReset(w http.ResponseWriter, r *http.Request) {
 		_, _ = DB.Exec("DELETE FROM agent_profile_matrices WHERE session_id = $1", sessUUID)
 	}
 
-	// 2. Delete cached session state in Go memory and Redis
+	// 2. Delete cached session state in Go memory, Redis, and quarantine cache
 	DeleteSessionState(uuidStr)
+	quarantineCache.Delete(uuidStr)
 
 	if redisClient != nil {
 		logs, _ := redisClient.LRange(redisCtx, "active_inference:logs", 0, -1).Result()

@@ -65,6 +65,7 @@ class Layer3MatrixInputs(BaseModel):
 session_engines = {}
 
 db_pool = None
+redis_client = None
 
 def init_db_pool():
     global db_pool
@@ -77,6 +78,18 @@ def init_db_pool():
         except Exception as e:
             print(f"[Sidecar] Connection pool init failed, retrying: {e}")
             time.sleep(2)
+
+def init_redis_client():
+    global redis_client
+    redis_url = os.environ.get("REDIS_URL")
+    if redis_url:
+        if not redis_url.startswith("redis://"):
+            redis_url = f"redis://{redis_url}"
+        try:
+            redis_client = redis.Redis.from_url(redis_url, socket_timeout=5)
+            print("[Sidecar] Redis client initialized successfully.")
+        except Exception as e:
+            print(f"[Sidecar] Redis client initialization failed: {e}")
 
 def get_db_connection():
     db_url = os.environ.get("DATABASE_URL", "postgresql://user:password@postgres_db:5432/postgres?sslmode=disable")
@@ -179,14 +192,15 @@ def handle_notification(event_or_uuid):
 
         updated_a1, updated_b1 = engine.adjust_layer1_matrices(decided_action, default_a1, default_b1)
 
-        # 6. Save modified matrices back to PostgreSQL
-        cur.execute(
-            """UPDATE agent_profile_matrices 
-               SET layer1_matrix_a = %s, layer1_matrix_b = %s 
-               WHERE session_id = %s""",
-            (json.dumps(updated_a1), json.dumps(updated_b1), session_id)
-        )
-        conn.commit()
+        # 6. Save modified matrices back to PostgreSQL only if the action changed (or first time)
+        if prev_action is None or prev_action != decided_action:
+            cur.execute(
+                """UPDATE agent_profile_matrices 
+                   SET layer1_matrix_a = %s, layer1_matrix_b = %s 
+                   WHERE session_id = %s""",
+                (json.dumps(updated_a1), json.dumps(updated_b1), session_id)
+            )
+            conn.commit()
 
         print(f"[Sidecar] Processed Layer 3 for Session {session_id}: L3 Obs {obs_3}, L3 Intent State {np_argmax_name(qs)}, Action {decided_action_name(decided_action)}, VFE: {vfe_3:.6f}")
 
@@ -218,28 +232,34 @@ def get_default_layer1_matrices():
     return data["layer1_matrix_a"], data["layer1_matrix_b"]
 
 def notify_gateway_reload(session_id, l2_beliefs, l2_action, l3_vfe, updated_a1=None, updated_b1=None):
+    global redis_client
+    payload = {
+        "session_id": session_id,
+        "l2_beliefs": l2_beliefs,
+        "l2_action": int(l2_action),
+        "l3_vfe": float(l3_vfe),
+        "layer1_matrix_a": updated_a1,
+        "layer1_matrix_b": updated_b1
+    }
+    if redis_client:
+        try:
+            redis_client.publish("active_inference:reloads", json.dumps(payload))
+            return
+        except Exception as e:
+            print(f"[Sidecar Redis PubSub Error] Failed to publish reload config, falling back to HTTP: {e}")
+
     gateway_url = os.environ.get("GATEWAY_URL", "http://gateway_proxy:1163")
     try:
-        payload = {
-            "session_id": session_id,
-            "l2_beliefs": l2_beliefs,
-            "l2_action": int(l2_action),
-            "l3_vfe": float(l3_vfe),
-            "layer1_matrix_a": updated_a1,
-            "layer1_matrix_b": updated_b1
-        }
         resp = requests.post(
             f"{gateway_url}/config/reload", 
             json=payload, 
             headers={"Content-Type": "application/json"},
             timeout=2
         )
-        if resp.status_code == 200:
-            print(f"[Sidecar] Successfully notified Gateway to reload configuration for session {session_id}.")
-        else:
-            print(f"[Sidecar] Gateway reload callback failed with status: {resp.status_code}")
+        if resp.status_code != 200:
+            print(f"[Sidecar] Gateway reload HTTP callback failed with status: {resp.status_code}")
     except Exception as e:
-        print(f"[Sidecar] Failed to connect to Gateway reload callback: {e}")
+        print(f"[Sidecar] Failed to connect to Gateway reload HTTP callback: {e}")
 
 # Flask validation API endpoint
 app_api = Flask("sidecar-api")
@@ -274,17 +294,12 @@ def run_flask():
     app_api.run(host="0.0.0.0", port=5001, debug=False, use_reloader=False)
 
 def run_redis_subscriber(executor):
-    redis_url = os.environ.get("REDIS_URL")
-    if not redis_url:
-        print("[Sidecar] REDIS_URL not set. Skipping Redis Pub/Sub subscriber.")
+    global redis_client
+    if not redis_client:
+        print("[Sidecar] Redis client not initialized. Skipping Redis Pub/Sub subscriber.")
         return
         
-    if not redis_url.startswith("redis://"):
-        redis_url = f"redis://{redis_url}"
-        
-    print(f"[Sidecar] Connecting to Redis at {redis_url}...")
-    r = redis.Redis.from_url(redis_url, socket_timeout=5)
-    pubsub = r.pubsub()
+    pubsub = redis_client.pubsub()
     pubsub.subscribe("active_inference:transactions")
     print("[Sidecar] Subscribed to Redis Pub/Sub channel: active_inference:transactions")
     
@@ -298,7 +313,7 @@ def run_redis_subscriber(executor):
             print(f"[Sidecar Error] Lost Redis connection, retrying in 2 seconds: {e}")
             time.sleep(2)
             try:
-                pubsub = r.pubsub()
+                pubsub = redis_client.pubsub()
                 pubsub.subscribe("active_inference:transactions")
             except:
                 pass
@@ -307,8 +322,9 @@ def run_redis_subscriber(executor):
             time.sleep(1)
 
 def main():
-    # 0. Initialize threaded database connection pool
+    # 0. Initialize threaded database connection pool & Redis client
     init_db_pool()
+    init_redis_client()
 
     # 1. Start Flask API server in a background daemon thread
     t = threading.Thread(target=run_flask, daemon=True)
@@ -317,7 +333,7 @@ def main():
     # 2. Initialize thread pool executor for processing notifications concurrently
     executor = ThreadPoolExecutor(max_workers=80)
 
-    # 3. Start Redis subscriber in a background thread if REDIS_URL is configured
+    # 3. Start Redis subscriber in a background thread if Redis is configured
     if os.environ.get("REDIS_URL"):
         t_redis = threading.Thread(target=run_redis_subscriber, args=(executor,), daemon=True)
         t_redis.start()

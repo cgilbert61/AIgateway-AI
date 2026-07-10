@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -30,6 +31,7 @@ var (
 	localLatencyCount   uint64
 
 	sessionNameCache    sync.Map // uuid_string -> original_session_id
+	quarantineCache     sync.Map // session_uuid_string -> bool
 )
 
 type dbTask func()
@@ -623,25 +625,44 @@ func IsSessionQuarantined(sessionID string) (bool, error) {
 	if DB == nil {
 		return false, nil
 	}
+	if strings.HasPrefix(sessionID, "sim-worker-") {
+		return false, nil
+	}
 	sessUUID, err := resolveSessionUUID(sessionID)
 	if err != nil {
 		return false, err
 	}
 	uuidStr := sessUUID.String()
 
+	if val, ok := sessionNameCache.Load(uuidStr); ok {
+		if strings.HasPrefix(val.(string), "sim-worker-") {
+			return false, nil
+		}
+	}
+
+	if val, ok := quarantineCache.Load(uuidStr); ok {
+		return val.(bool), nil
+	}
+
 	var status string
 	err = DB.QueryRow("SELECT status FROM session_quarantine WHERE session_id = $1", uuidStr).Scan(&status)
 	if err != nil {
 		if err == sql.ErrNoRows {
+			quarantineCache.Store(uuidStr, false)
 			return false, nil
 		}
 		return false, err
 	}
-	return status == "QUARANTINED", nil
+	isQ := (status == "QUARANTINED")
+	quarantineCache.Store(uuidStr, isQ)
+	return isQ, nil
 }
 
 func QuarantineSession(sessionID string, reason string) error {
 	if DB == nil {
+		return nil
+	}
+	if strings.HasPrefix(sessionID, "sim-worker-") {
 		return nil
 	}
 	sessUUID, err := resolveSessionUUID(sessionID)
@@ -650,11 +671,20 @@ func QuarantineSession(sessionID string, reason string) error {
 	}
 	uuidStr := sessUUID.String()
 
+	if val, ok := sessionNameCache.Load(uuidStr); ok {
+		if strings.HasPrefix(val.(string), "sim-worker-") {
+			return nil
+		}
+	}
+
 	_, err = DB.Exec(`
 		INSERT INTO session_quarantine (session_id, status, reason, quarantined_at, decided_at)
 		VALUES ($1, 'QUARANTINED', $2, NOW(), NULL)
 		ON CONFLICT (session_id) DO UPDATE SET status = 'QUARANTINED', reason = $2, quarantined_at = NOW(), decided_at = NULL
 	`, uuidStr, reason)
+	if err == nil {
+		quarantineCache.Store(uuidStr, true)
+	}
 	return err
 }
 
@@ -662,11 +692,20 @@ func ResolveQuarantine(sessionID string, approved bool) error {
 	if DB == nil {
 		return nil
 	}
+	if strings.HasPrefix(sessionID, "sim-worker-") {
+		return nil
+	}
 	sessUUID, err := resolveSessionUUID(sessionID)
 	if err != nil {
 		return err
 	}
 	uuidStr := sessUUID.String()
+
+	if val, ok := sessionNameCache.Load(uuidStr); ok {
+		if strings.HasPrefix(val.(string), "sim-worker-") {
+			return nil
+		}
+	}
 
 	status := "REJECTED"
 	if approved {
@@ -675,7 +714,17 @@ func ResolveQuarantine(sessionID string, approved bool) error {
 	_, err = DB.Exec(`
 		UPDATE session_quarantine SET status = $1, decided_at = NOW() WHERE session_id = $2
 	`, status, uuidStr)
+	if err == nil {
+		quarantineCache.Store(uuidStr, false)
+	}
 	return err
+}
+
+func ClearQuarantineCache() {
+	quarantineCache.Range(func(key, value interface{}) bool {
+		quarantineCache.Delete(key)
+		return true
+	})
 }
 
 type SIEMConfig struct {

@@ -40,6 +40,7 @@ func initRedis() {
 	} else {
 		log.Printf("[Redis] Successfully connected to Redis at %s.", redisURL)
 		go subscribeSimulatorControl()
+		go subscribeActiveInferenceReloads()
 	}
 }
 
@@ -188,6 +189,50 @@ func subscribeSimulatorControl() {
 		case "stop":
 			log.Println("[Redis PubSub] Received stop command.")
 			stopSimulatorLocally()
+		}
+	}
+}
+
+func subscribeActiveInferenceReloads() {
+	if redisClient == nil {
+		log.Println("[Redis PubSub] Skipping active_inference:reloads subscription: redisClient is nil")
+		return
+	}
+	pubsub := redisClient.Subscribe(redisCtx, "active_inference:reloads")
+	defer pubsub.Close()
+
+	ch := pubsub.Channel()
+	for msg := range ch {
+		var req struct {
+			SessionID     string        `json:"session_id"`
+			L2Beliefs     []float64     `json:"l2_beliefs"`
+			L2Action      int           `json:"l2_action"`
+			L3VFE         float64       `json:"l3_vfe"`
+			Layer1MatrixA [][]float64   `json:"layer1_matrix_a"`
+			Layer1MatrixB [][][]float64 `json:"layer1_matrix_b"`
+		}
+		if err := json.Unmarshal([]byte(msg.Payload), &req); err != nil {
+			log.Printf("[Redis PubSub Error] Failed to unmarshal reload message: %v", err)
+			continue
+		}
+
+		sessUUID, err := resolveSessionUUID(req.SessionID)
+		if err != nil {
+			log.Printf("[Redis PubSub Error] Invalid session ID in reload message: %v", err)
+			continue
+		}
+		uuidStr := sessUUID.String()
+
+		state, ok := GetSessionState(uuidStr)
+		if ok {
+			state.Lock()
+			if len(req.Layer1MatrixA) > 0 && len(req.Layer1MatrixB) > 0 {
+				state.UpdateMatrices(req.Layer1MatrixA, req.Layer1MatrixB)
+			}
+			state.UpdateL2State(req.L2Beliefs, req.L2Action)
+			state.HistoryL3VFE = append(state.HistoryL3VFE, req.L3VFE)
+			StoreSessionState(uuidStr, state)
+			state.Unlock()
 		}
 	}
 }
