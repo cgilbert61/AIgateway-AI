@@ -1092,9 +1092,30 @@ func handleEvaluate(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleConfigReload(w http.ResponseWriter, r *http.Request) {
-	sessionID := r.URL.Query().Get("session_id")
+	var req struct {
+		SessionID     string        `json:"session_id"`
+		L2Beliefs     []float64     `json:"l2_beliefs"`
+		L2Action      int           `json:"l2_action"`
+		L3VFE         float64       `json:"l3_vfe"`
+		Layer1MatrixA [][]float64   `json:"layer1_matrix_a"`
+		Layer1MatrixB [][][]float64 `json:"layer1_matrix_b"`
+	}
+
+	isJSON := false
+	if r.Header.Get("Content-Type") == "application/json" {
+		decoder := json.NewDecoder(r.Body)
+		if err := decoder.Decode(&req); err == nil {
+			isJSON = true
+		}
+	}
+
+	sessionID := req.SessionID
+	if !isJSON {
+		sessionID = r.URL.Query().Get("session_id")
+	}
+
 	if sessionID == "" {
-		http.Error(w, "Missing session_id query parameter", http.StatusBadRequest)
+		http.Error(w, "Missing session_id", http.StatusBadRequest)
 		return
 	}
 
@@ -1112,41 +1133,50 @@ func handleConfigReload(w http.ResponseWriter, r *http.Request) {
 			StoreSessionState(uuidStr, state)
 			state.Unlock()
 		}()
-		a1, b1, theta, err := GetSessionMatrices(uuidStr)
-		if err == nil {
-			state.UpdateMatrices(a1, b1)
-			state.Theta = theta
-			log.Printf("Updated cached matrices for active session %s from PostgreSQL (state preserved).", uuidStr)
+
+		if isJSON && len(req.Layer1MatrixA) > 0 && len(req.Layer1MatrixB) > 0 {
+			state.UpdateMatrices(req.Layer1MatrixA, req.Layer1MatrixB)
 		} else {
-			log.Printf("Failed to load updated matrices for session %s: %v. Clearing cache...", uuidStr, err)
-			DeleteSessionState(uuidStr)
-		}
-
-		// Parse L2 beliefs and action from query parameters
-		l2BeliefsStr := r.URL.Query().Get("l2_beliefs")
-		l2ActionStr := r.URL.Query().Get("l2_action")
-		l3VfeStr := r.URL.Query().Get("l3_vfe")
-		var l2Beliefs []float64
-		var l2Action int
-
-		if l2BeliefsStr != "" {
-			parts := strings.Split(l2BeliefsStr, ",")
-			for _, p := range parts {
-				var val float64
-				if _, err := fmt.Sscanf(p, "%f", &val); err == nil {
-					l2Beliefs = append(l2Beliefs, val)
-				}
+			a1, b1, theta, err := GetSessionMatrices(uuidStr)
+			if err == nil {
+				state.UpdateMatrices(a1, b1)
+				state.Theta = theta
+				log.Printf("Updated cached matrices for active session %s from PostgreSQL (state preserved).", uuidStr)
+			} else {
+				log.Printf("Failed to load updated matrices for session %s: %v. Clearing cache...", uuidStr, err)
+				DeleteSessionState(uuidStr)
 			}
 		}
-		if l2ActionStr != "" {
-			fmt.Sscanf(l2ActionStr, "%d", &l2Action)
-		}
-		state.UpdateL2State(l2Beliefs, l2Action)
 
-		if l3VfeStr != "" {
-			var val float64
-			if _, err := fmt.Sscanf(l3VfeStr, "%f", &val); err == nil {
-				state.HistoryL3VFE = append(state.HistoryL3VFE, val)
+		if isJSON {
+			state.UpdateL2State(req.L2Beliefs, req.L2Action)
+			state.HistoryL3VFE = append(state.HistoryL3VFE, req.L3VFE)
+		} else {
+			l2BeliefsStr := r.URL.Query().Get("l2_beliefs")
+			l2ActionStr := r.URL.Query().Get("l2_action")
+			l3VfeStr := r.URL.Query().Get("l3_vfe")
+			var l2Beliefs []float64
+			var l2Action int
+
+			if l2BeliefsStr != "" {
+				parts := strings.Split(l2BeliefsStr, ",")
+				for _, p := range parts {
+					var val float64
+					if _, err := fmt.Sscanf(p, "%f", &val); err == nil {
+						l2Beliefs = append(l2Beliefs, val)
+					}
+				}
+			}
+			if l2ActionStr != "" {
+				fmt.Sscanf(l2ActionStr, "%d", &l2Action)
+			}
+			state.UpdateL2State(l2Beliefs, l2Action)
+
+			if l3VfeStr != "" {
+				var val float64
+				if _, err := fmt.Sscanf(l3VfeStr, "%f", &val); err == nil {
+					state.HistoryL3VFE = append(state.HistoryL3VFE, val)
+				}
 			}
 		}
 		state.PruneHistory()

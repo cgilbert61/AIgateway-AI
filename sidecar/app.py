@@ -71,7 +71,7 @@ def init_db_pool():
     db_url = os.environ.get("DATABASE_URL", "postgresql://user:password@postgres_db:5432/postgres?sslmode=disable")
     while True:
         try:
-            db_pool = ThreadedConnectionPool(minconn=2, maxconn=15, dsn=db_url)
+            db_pool = ThreadedConnectionPool(minconn=5, maxconn=100, dsn=db_url)
             print("[Sidecar] Database connection pool initialized successfully.")
             break
         except Exception as e:
@@ -191,7 +191,7 @@ def handle_notification(event_or_uuid):
         print(f"[Sidecar] Processed Layer 3 for Session {session_id}: L3 Obs {obs_3}, L3 Intent State {np_argmax_name(qs)}, Action {decided_action_name(decided_action)}, VFE: {vfe_3:.6f}")
 
         # 7. Notify Go Gateway to clear its matrix cache for this session
-        notify_gateway_reload(session_id, qs.tolist(), decided_action, vfe_3)
+        notify_gateway_reload(session_id, qs.tolist(), decided_action, vfe_3, updated_a1, updated_b1)
 
     except Exception as e:
         print(f"[Sidecar Error] Error processing transaction {tx_uuid}: {e}")
@@ -217,13 +217,21 @@ def get_default_layer1_matrices():
         data = json.load(f)
     return data["layer1_matrix_a"], data["layer1_matrix_b"]
 
-def notify_gateway_reload(session_id, l2_beliefs, l2_action, l3_vfe):
+def notify_gateway_reload(session_id, l2_beliefs, l2_action, l3_vfe, updated_a1=None, updated_b1=None):
     gateway_url = os.environ.get("GATEWAY_URL", "http://gateway_proxy:1163")
     try:
-        beliefs_str = ",".join([f"{x:.6f}" for x in l2_beliefs])
+        payload = {
+            "session_id": session_id,
+            "l2_beliefs": l2_beliefs,
+            "l2_action": int(l2_action),
+            "l3_vfe": float(l3_vfe),
+            "layer1_matrix_a": updated_a1,
+            "layer1_matrix_b": updated_b1
+        }
         resp = requests.post(
             f"{gateway_url}/config/reload", 
-            params={"session_id": session_id, "l2_beliefs": beliefs_str, "l2_action": l2_action, "l3_vfe": f"{l3_vfe:.6f}"}, 
+            json=payload, 
+            headers={"Content-Type": "application/json"},
             timeout=2
         )
         if resp.status_code == 200:
@@ -307,7 +315,7 @@ def main():
     t.start()
 
     # 2. Initialize thread pool executor for processing notifications concurrently
-    executor = ThreadPoolExecutor(max_workers=3)
+    executor = ThreadPoolExecutor(max_workers=80)
 
     # 3. Start Redis subscriber in a background thread if REDIS_URL is configured
     if os.environ.get("REDIS_URL"):
