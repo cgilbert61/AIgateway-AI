@@ -124,6 +124,9 @@ func main() {
 	// 1.7. Initialize OpenTelemetry metrics provider
 	initOTel()
 
+	// 1.9. Initialize MinIO client and compliance datalake
+	initMinIO()
+
 	// 2. Load Gateway target settings
 	loadConfig()
 
@@ -308,6 +311,7 @@ func handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if quarantined {
 		txID := uuid.New().String()
 		LogTransactionStateAsync(txID, sessionID, OBS_INPUT_ERROR, 0.0, 0.0, 0.0, true)
+		LogComplianceAuditAsync(txID, sessionID, OBS_INPUT_ERROR, 0.0, 0.0, 0.0, true, r, nil)
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)
@@ -411,6 +415,7 @@ func handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		
 		txID := uuid.New().String()
 		LogTransactionStateAsync(txID, sessionID, obs, 4.2, vfe, 0.0, true)
+		LogComplianceAuditAsync(txID, sessionID, obs, 4.2, vfe, 0.0, true, r, body)
 		
 		respJSON, _ := json.Marshal(map[string]interface{}{
 			"error":          "Security Block: OPA Policy Violation",
@@ -513,6 +518,7 @@ func handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	LogTransactionStateAsync(txID, sessionID, obs, vfeL1, vfe, vfeL3, isBlocked)
+	LogComplianceAuditAsync(txID, sessionID, obs, vfeL1, vfe, vfeL3, isBlocked, r, body)
 
 	// Identify entity and log Layer 4 cross-session historical state
 	entityKey := r.Header.Get("Authorization")
@@ -683,6 +689,7 @@ func handleAgentAction(w http.ResponseWriter, r *http.Request) {
 	if quarantined {
 		txID := uuid.New().String()
 		LogTransactionStateAsync(txID, sessionID, OBS_INPUT_ERROR, 0.0, 0.0, 0.0, true)
+		LogComplianceAuditAsync(txID, sessionID, OBS_INPUT_ERROR, 0.0, 0.0, 0.0, true, r, nil)
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)
@@ -786,6 +793,7 @@ func handleAgentAction(w http.ResponseWriter, r *http.Request) {
 		
 		txID := uuid.New().String()
 		LogTransactionStateAsync(txID, sessionID, obs, 4.2, vfe, 0.0, true)
+		LogComplianceAuditAsync(txID, sessionID, obs, 4.2, vfe, 0.0, true, r, body)
 		
 		blockedReason := fmt.Sprintf("Blocked by Open Policy Agent (OPA): %s", reason)
 		if err := QuarantineSession(sessionID, blockedReason); err != nil {
@@ -892,6 +900,7 @@ func handleAgentAction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	LogTransactionStateAsync(txID, sessionID, obs, vfeL1, vfe, vfeL3, isBlocked)
+	LogComplianceAuditAsync(txID, sessionID, obs, vfeL1, vfe, vfeL3, isBlocked, r, body)
 
 	// Identify entity and log Layer 4 cross-session historical state
 	entityKey := r.Header.Get("Authorization")
@@ -1086,6 +1095,7 @@ func handleEvaluate(w http.ResponseWriter, r *http.Request) {
 		vfeL3 = state.HistoryL3VFE[len(state.HistoryL3VFE)-1]
 	}
 	LogTransactionStateAsync(txID, sessionID, req.Observation, vfeL1, vfe, vfeL3, isBlocked)
+	LogComplianceAuditAsync(txID, sessionID, req.Observation, vfeL1, vfe, vfeL3, isBlocked, r, nil)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -2339,6 +2349,7 @@ func validateAgentKey(w http.ResponseWriter, r *http.Request, body []byte, isAct
 	txID := uuid.New().String()
 	obs := OBS_INPUT_ERROR
 	LogTransactionStateAsync(txID, sessID, obs, 5.0, 5.0, 5.0, true)
+	LogComplianceAuditAsync(txID, sessID, obs, 5.0, 5.0, 5.0, true, r, body)
 
 	respJSON, _ := json.Marshal(map[string]interface{}{
 		"error":          "Security Block: Agent Verification Failed",
@@ -2899,6 +2910,20 @@ func handleAPIQuarantineAction(w http.ResponseWriter, r *http.Request) {
 					newTxID := uuid.New().String()
 					_ = LogTransactionState(newTxID, sessID, 0, 0.0, 0.0, 0.0, false)
 					logSecurityAuditEvent(newTxID, sessID, "quarantine_redeliver", "SAFE", "REDELIVERED", 0.0, "ALLOW", false)
+					UploadAuditLogAsync(newTxID, AuditLogPayload{
+						TransactionID: newTxID,
+						SessionID:     sessID,
+						Observation:   0,
+						VFEScore:      0.0,
+						VFEScoreL1:    0.0,
+						VFEScoreL3:    0.0,
+						IsBlocked:     false,
+						Timestamp:     time.Now(),
+						ClientIP:      r.RemoteAddr,
+						ClaimedKey:    "quarantine_redeliver",
+						UserAgent:     r.UserAgent(),
+						Payload:       lastPayload.RawRequest,
+					})
 				}(req.SessionID, *lastPayload)
 			}
 		}

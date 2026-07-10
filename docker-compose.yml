@@ -47,7 +47,10 @@ services:
       DEFAULT_MATRICES_PATH: /app/config/default_matrices.json
       GATEWAY_CONFIG_PATH: /app/config/gateway_config.json
       PORT: 1163
-      GOMAXPROCS: 2
+      MINIO_ENDPOINT: aiaiai-minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadminpassword
+      MINIO_BUCKET_NAME: compliance-audit-logs
     volumes:
       - ./config:/app/config
       - ./gateway/policies:/app/policies
@@ -59,6 +62,8 @@ services:
       aiaiai_postgres:
         condition: service_healthy
       aiaiai_redis:
+        condition: service_healthy
+      aiaiai-minio:
         condition: service_healthy
     deploy:
       resources:
@@ -121,6 +126,35 @@ services:
       - "6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512MB
+
+  # =========================================================================
+  # 6. MinIO Datalake (Compliance Storage, WORM Audit Logs)
+  # =========================================================================
+  aiaiai-minio:
+    image: minio/minio:RELEASE.2023-09-04T19-57-37Z
+    container_name: aiaiai-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadminpassword
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - type: tmpfs
+        target: /data
+        tmpfs:
+          size: 256M
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 5s
       timeout: 5s
       retries: 5
