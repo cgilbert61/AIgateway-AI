@@ -953,8 +953,12 @@
                     <input type="text" id="custom-payload-input" class="form-input" placeholder='{"prompt": "Hello!"} or shell command'>
                     
                     <div style="display:flex; gap: 8px; margin-top: 8px;">
-                        <button class="btn btn-primary" onclick="sendCustomPayload()" style="flex:1; justify-content: center; margin: 0;">Send Request</button>
-                        <button class="btn" onclick="document.getElementById('custom-payload-file-input').click()" style="border-color: rgba(6, 182, 212, 0.3); color: var(--color-cyan); margin: 0;">Add File(s)</button>
+                        <button class="btn btn-primary" onclick="sendCustomPayload()" style="flex:2; justify-content: center; margin: 0;">Send Request</button>
+                        <button class="btn" onclick="document.getElementById('custom-payload-file-input').click()" style="flex:1; border-color: rgba(6, 182, 212, 0.3); color: var(--color-cyan); margin: 0; padding: 6px 12px; font-size:11px; justify-content:center;">Add File(s)</button>
+                        <button class="btn" onclick="openMinioBrowser()" style="flex:1; border-color: rgba(168, 85, 247, 0.4); color: #c084fc; margin: 0; padding: 6px 12px; font-size:11px; display:flex; align-items:center; justify-content:center; gap:4px;">
+                            <svg style="width:12px; height:12px; fill:currentColor;" viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM19 18H6c-2.21 0-4-1.79-4-4 0-2.05 1.53-3.76 3.56-3.97l1.07-.11.5-.95C8.08 7.14 9.94 6 12 6c2.62 0 4.88 1.86 5.39 4.43l.3 1.5 1.53.11c1.56.1 2.78 1.41 2.78 2.96 0 1.65-1.35 3-3 3zm-5.55-8h-2.9v3H8l4 4 4-4h-2.55z"/></svg>
+                            Add S3
+                        </button>
                     </div>
                     
                     <div id="file-upload-indicator" style="display:none; font-size:11px; margin-top:8px; color: var(--color-cyan); background: rgba(6,182,212,0.05); border: 1px dashed rgba(6,182,212,0.2); padding: 6px 10px; border-radius: 4px; justify-content: space-between; align-items: center;">
@@ -3882,6 +3886,171 @@
         function closeForensicsModal() {
             document.getElementById("forensics-modal").style.display = "none";
         }
+
+        async function openMinioBrowser() {
+            document.getElementById("minio-modal").style.display = "flex";
+            const select = document.getElementById("minio-bucket-select");
+            select.innerHTML = '<option value="">Loading buckets...</option>';
+            document.getElementById("minio-objects-tbody").innerHTML = '<tr><td colspan="4" style="text-align:center; padding:30px; color:var(--text-muted);">Select a bucket to browse files</td></tr>';
+            
+            try {
+                const resp = await fetch("/api/minio/buckets");
+                if (!resp.ok) throw new Error("Failed to fetch buckets");
+                const buckets = await resp.json();
+                
+                select.innerHTML = '';
+                buckets.forEach(b => {
+                    const opt = document.createElement("option");
+                    opt.value = b;
+                    opt.textContent = b;
+                    if (b === "staging") opt.selected = true;
+                    select.appendChild(opt);
+                });
+                
+                if (buckets.length > 0) {
+                    loadMinioObjects();
+                }
+            } catch(e) {
+                select.innerHTML = '<option value="">Failed to load buckets</option>';
+            }
+        }
+
+        function closeMinioBrowser() {
+            document.getElementById("minio-modal").style.display = "none";
+        }
+
+        async function loadMinioObjects() {
+            const bucket = document.getElementById("minio-bucket-select").value;
+            const tbody = document.getElementById("minio-objects-tbody");
+            if (!bucket) return;
+            
+            tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:30px; color:var(--text-muted);">Loading files...</td></tr>';
+            
+            try {
+                const resp = await fetch(`/api/minio/objects?bucket=${encodeURIComponent(bucket)}`);
+                if (!resp.ok) throw new Error("Failed to fetch objects");
+                const objects = await resp.json();
+                
+                tbody.innerHTML = '';
+                if (!objects || objects.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:30px; color:var(--text-muted);">No files found in this bucket. Stage a payload below!</td></tr>';
+                    return;
+                }
+                
+                objects.forEach(obj => {
+                    const tr = document.createElement("tr");
+                    tr.style.borderBottom = "1px solid rgba(255,255,255,0.02)";
+                    
+                    const formatSize = (bytes) => {
+                        if (bytes === 0) return "0 B";
+                        const k = 1024;
+                        const sizes = ["B", "KB", "MB"];
+                        const i = Math.floor(Math.log(bytes) / Math.log(k));
+                        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+                    };
+                    
+                    tr.innerHTML = `
+                        <td style="padding:8px 12px; font-family:'JetBrains Mono', monospace; font-size:11px; word-break:break-all; color:#e2e8f0;">${obj.key}</td>
+                        <td style="padding:8px 12px; color:var(--text-muted);">${formatSize(obj.size)}</td>
+                        <td style="padding:8px 12px; color:var(--text-muted); font-size:11px;">${new Date(obj.last_modified).toLocaleString()}</td>
+                        <td style="padding:8px 12px; text-align:center;">
+                            <button class="btn" onclick="loadMinioFileContent('${bucket}', '${obj.key}')" style="margin:0; padding:2px 8px; font-size:10px; border-color:rgba(168,85,247,0.4); color:#c084fc; height:20px; justify-content:center;">Load File</button>
+                        </td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            } catch(e) {
+                tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; padding:30px; color:var(--color-rose);">Failed to list files: ${e.message}</td></tr>`;
+            }
+        }
+
+        async function loadMinioFileContent(bucket, key) {
+            try {
+                const resp = await fetch(`/api/minio/object/content?bucket=${encodeURIComponent(bucket)}&key=${encodeURIComponent(key)}`);
+                if (!resp.ok) throw new Error("Failed to fetch file content");
+                const text = await resp.text();
+                
+                document.getElementById("custom-payload-input").value = text;
+                
+                const indicator = document.getElementById("file-upload-indicator");
+                const label = document.getElementById("file-upload-label");
+                label.textContent = `S3: ${bucket}/${key}`;
+                indicator.style.display = "flex";
+                
+                closeMinioBrowser();
+            } catch(e) {
+                alert(`Error loading file: ${e.message}`);
+            }
+        }
+
+        function updateMinioUploadFileLabel() {
+            const input = document.getElementById("minio-upload-file-input");
+            const keyInput = document.getElementById("minio-upload-key");
+            const statusDiv = document.getElementById("minio-upload-status");
+            
+            if (input.files.length > 0) {
+                const file = input.files[0];
+                keyInput.value = file.name;
+                statusDiv.textContent = `Selected: ${file.name} (${(file.size/1024).toFixed(1)} KB)`;
+                statusDiv.style.display = "block";
+            }
+        }
+
+        async function uploadToMinio() {
+            const bucket = document.getElementById("minio-bucket-select").value;
+            const key = document.getElementById("minio-upload-key").value;
+            const fileInput = document.getElementById("minio-upload-file-input");
+            const statusDiv = document.getElementById("minio-upload-status");
+            
+            if (!bucket) {
+                alert("Please select a bucket first.");
+                return;
+            }
+            if (!key) {
+                alert("Please enter a file key (name).");
+                return;
+            }
+            if (fileInput.files.length === 0) {
+                alert("Please select a file to upload.");
+                return;
+            }
+            
+            const formData = new FormData();
+            formData.append("bucket", bucket);
+            formData.append("key", key);
+            formData.append("file", fileInput.files[0]);
+            
+            statusDiv.textContent = "Uploading file to S3...";
+            statusDiv.style.color = "#c084fc";
+            statusDiv.style.display = "block";
+            
+            try {
+                const resp = await fetch("/api/minio/object/upload", {
+                    method: "POST",
+                    body: formData
+                });
+                
+                if (!resp.ok) {
+                    const errText = await resp.text();
+                    throw new Error(errText || "Upload failed");
+                }
+                
+                statusDiv.textContent = "Uploaded successfully!";
+                statusDiv.style.color = "#4ade80";
+                
+                fileInput.value = '';
+                document.getElementById("minio-upload-key").value = '';
+                
+                loadMinioObjects();
+                
+                setTimeout(() => {
+                    statusDiv.style.display = "none";
+                }, 3000);
+            } catch(e) {
+                statusDiv.textContent = `Error: ${e.message}`;
+                statusDiv.style.color = "var(--color-rose)";
+            }
+        }
     </script>
 
     <!-- Forensics Drilldown Modal -->
@@ -3893,6 +4062,64 @@
             </div>
             <div style="padding: 20px; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 16px;" id="forensics-modal-body">
                 <!-- Drilldown details -->
+            </div>
+        </div>
+    </div>
+
+    <!-- MinIO/S3 File Browser Modal -->
+    <div id="minio-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 10000; align-items: center; justify-content: center; backdrop-filter: blur(8px);">
+        <div style="background: #0f172a; border: 1px solid var(--border-color); width: 80%; max-width: 800px; height: 80%; max-height: 600px; border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 10px 25px rgba(0,0,0,0.5);">
+            <!-- Modal Header -->
+            <div style="padding: 16px; background: rgba(20, 24, 33, 0.7); border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;">
+                <span style="font-weight: 700; font-size: 15px; color: #c084fc; display:flex; align-items:center; gap:8px;">
+                    <svg style="width:16px; height:16px; fill:currentColor;" viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z"/></svg>
+                    S3/MinIO Datalake Browser
+                </span>
+                <button onclick="closeMinioBrowser()" style="background: none; border: none; color: var(--text-muted); font-size: 22px; cursor: pointer; line-height: 1;">&times;</button>
+            </div>
+            <!-- Modal Body -->
+            <div style="padding: 20px; flex: 1; display: flex; flex-direction: column; gap: 16px; overflow-y: hidden;">
+                <!-- Bucket Selector -->
+                <div style="display:flex; gap: 12px; align-items:center; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); padding: 10px 14px; border-radius:6px;">
+                    <span style="font-size:11px; font-weight:600; text-transform:uppercase; color: var(--text-muted);">Selected Bucket:</span>
+                    <select id="minio-bucket-select" onchange="loadMinioObjects()" style="background:#090b11; border:1px solid var(--border-color); color:#fff; padding:4px 8px; border-radius:4px; font-size:12px; min-width:200px;">
+                        <option value="">Loading buckets...</option>
+                    </select>
+                </div>
+
+                <!-- Files Table -->
+                <div style="flex:1; border: 1px solid var(--border-color); border-radius:6px; background:#090b11; overflow-y:auto; position:relative;">
+                    <table style="width:100%; border-collapse:collapse; text-align:left; font-size:12px;">
+                        <thead>
+                            <tr style="background:rgba(255,255,255,0.03); border-bottom:1px solid var(--border-color); position:sticky; top:0; z-index:10;">
+                                <th style="padding:8px 12px; color:var(--text-muted); font-weight:600; text-transform:uppercase; font-size:10px;">File Key (Path)</th>
+                                <th style="padding:8px 12px; color:var(--text-muted); font-weight:600; text-transform:uppercase; font-size:10px; width:100px;">Size</th>
+                                <th style="padding:8px 12px; color:var(--text-muted); font-weight:600; text-transform:uppercase; font-size:10px; width:150px;">Last Modified</th>
+                                <th style="padding:8px 12px; color:var(--text-muted); font-weight:600; text-transform:uppercase; font-size:10px; width:100px; text-align:center;">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="minio-objects-tbody">
+                            <tr>
+                                <td colspan="4" style="text-align:center; padding:30px; color:var(--text-muted);">Select a bucket to browse files</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Upload Section -->
+                <div style="background: rgba(168, 85, 247, 0.05); border: 1px dashed rgba(168, 85, 247, 0.3); border-radius: 6px; padding: 12px 16px; display:flex; justify-content:space-between; align-items:center; gap:16px;">
+                    <div style="display:flex; flex-direction:column; gap:2px;">
+                        <span style="font-size:11px; font-weight:600; color: #c084fc; text-transform:uppercase;">Stage Test Payload directly to Bucket</span>
+                        <span style="font-size:9px; color: var(--text-muted);">Write/Upload custom prompts, JSON packets or bash scripts.</span>
+                    </div>
+                    <div style="display:flex; gap:8px; align-items:center;">
+                        <input type="text" id="minio-upload-key" placeholder="file_name.json" style="background:#090b11; border:1px solid var(--border-color); color:#fff; font-size:11px; padding:4px 8px; border-radius:4px; width:150px; height:26px; box-sizing:border-box;">
+                        <button class="btn" onclick="document.getElementById('minio-upload-file-input').click()" style="border-color: rgba(168, 85, 247, 0.3); color:#c084fc; font-size:11px; margin:0; height:26px; justify-content:center;">Choose File</button>
+                        <button class="btn btn-primary" onclick="uploadToMinio()" style="background:#a855f7; border-color:#a855f7; color:#fff; font-size:11px; margin:0; height:26px; justify-content:center;">Upload</button>
+                    </div>
+                    <input type="file" id="minio-upload-file-input" style="display:none;" onchange="updateMinioUploadFileLabel()">
+                </div>
+                <div id="minio-upload-status" style="display:none; font-size:10px; color:#c084fc; margin-top:-8px; padding-left:4px;"></div>
             </div>
         </div>
     </div>

@@ -21,6 +21,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/lib/pq"
+	"github.com/minio/minio-go/v7"
 )
 
 // Config represents the settings in gateway_config.json
@@ -162,6 +163,10 @@ func main() {
 		mux1.HandleFunc("/api/siem/config", handleAPISIEMConfig)
 		mux1.HandleFunc("/api/quarantine/list", handleAPIQuarantineList)
 		mux1.HandleFunc("/api/quarantine/action", handleAPIQuarantineAction)
+		mux1.HandleFunc("/api/minio/buckets", handleMinIOListBuckets)
+		mux1.HandleFunc("/api/minio/objects", handleMinIOListObjects)
+		mux1.HandleFunc("/api/minio/object/content", handleMinIOGetObjectContent)
+		mux1.HandleFunc("/api/minio/object/upload", handleMinIOUploadObject)
 		mux1.HandleFunc("/flow.html", handleFlowPage)
 		mux1.HandleFunc("/quarantine.html", handleQuarantinePage)
 		mux1.HandleFunc("/", handleDashboard)
@@ -2931,5 +2936,154 @@ func handleAPIQuarantineAction(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "SUCCESS"})
+}
+
+func handleMinIOListBuckets(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if minioClient == nil {
+		http.Error(w, "MinIO is not configured", http.StatusInternalServerError)
+		return
+	}
+	buckets, err := minioClient.ListBuckets(context.Background())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	var names []string
+	for _, b := range buckets {
+		names = append(names, b.Name)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(names)
+}
+
+func handleMinIOListObjects(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if minioClient == nil {
+		http.Error(w, "MinIO is not configured", http.StatusInternalServerError)
+		return
+	}
+	bucket := r.URL.Query().Get("bucket")
+	if bucket == "" {
+		http.Error(w, "Missing 'bucket' parameter", http.StatusBadRequest)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	objectCh := minioClient.ListObjects(ctx, bucket, minio.ListObjectsOptions{
+		Recursive: true,
+	})
+
+	type objectInfo struct {
+		Key          string    `json:"key"`
+		Size         int64     `json:"size"`
+		LastModified time.Time `json:"last_modified"`
+	}
+	var objects []objectInfo
+
+	for obj := range objectCh {
+		if obj.Err != nil {
+			http.Error(w, obj.Err.Error(), http.StatusInternalServerError)
+			return
+		}
+		objects = append(objects, objectInfo{
+			Key:          obj.Key,
+			Size:         obj.Size,
+			LastModified: obj.LastModified,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(objects)
+}
+
+func handleMinIOGetObjectContent(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if minioClient == nil {
+		http.Error(w, "MinIO is not configured", http.StatusInternalServerError)
+		return
+	}
+	bucket := r.URL.Query().Get("bucket")
+	key := r.URL.Query().Get("key")
+	if bucket == "" || key == "" {
+		http.Error(w, "Missing 'bucket' or 'key' parameter", http.StatusBadRequest)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	obj, err := minioClient.GetObject(ctx, bucket, key, minio.GetObjectOptions{})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer obj.Close()
+
+	stat, err := obj.Stat()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", stat.Size))
+	_, _ = io.Copy(w, obj)
+}
+
+func handleMinIOUploadObject(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if minioClient == nil {
+		http.Error(w, "MinIO is not configured", http.StatusInternalServerError)
+		return
+	}
+
+	err := r.ParseMultipartForm(10 << 20)
+	if err != nil {
+		http.Error(w, "Failed to parse multipart form", http.StatusBadRequest)
+		return
+	}
+
+	bucket := r.FormValue("bucket")
+	key := r.FormValue("key")
+	if bucket == "" || key == "" {
+		http.Error(w, "Missing 'bucket' or 'key' fields", http.StatusBadRequest)
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, "Missing 'file' attachment", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	_, err = minioClient.PutObject(ctx, bucket, key, file, header.Size, minio.PutObjectOptions{
+		ContentType: header.Header.Get("Content-Type"),
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "SUCCESS", "message": "Uploaded successfully"})
 }
 

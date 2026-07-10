@@ -98,6 +98,23 @@ func initMinIO() {
 		log.Printf("[MinIO] Bucket '%s' already exists and is active.", minioBucket)
 	}
 
+	// Ensure staging, quarantine, and demo buckets exist
+	extraBuckets := []string{"staging", "quarantine", "demo"}
+	for _, b := range extraBuckets {
+		exists, err := minioClient.BucketExists(context.Background(), b)
+		if err == nil && !exists {
+			log.Printf("[MinIO] Bucket '%s' does not exist. Creating...", b)
+			createCtx, createCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			err = minioClient.MakeBucket(createCtx, b, minio.MakeBucketOptions{})
+			createCancel()
+			if err != nil {
+				log.Printf("[MinIO Error] Failed to create bucket '%s': %v", b, err)
+			} else {
+				log.Printf("[MinIO] Bucket '%s' created successfully.", b)
+			}
+		}
+	}
+
 	// Start the dedicated high-performance worker pool for MinIO uploads
 	StartMinIOWorkerPool()
 }
