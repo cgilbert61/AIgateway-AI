@@ -1114,6 +1114,10 @@
                                     <strong style="color:var(--text-muted); letter-spacing: 0.05em;">VIOLATING PAYLOAD CONTENT:</strong>
                                     <textarea id="quarantine-detail-payload" readonly style="width:100%; height:200px; background:rgba(0,0,0,0.4); border:1px solid rgba(255,255,255,0.05); border-radius:4px; color:#e2e8f0; font-family:'JetBrains Mono',monospace; padding:10px; font-size:11px; resize:none; outline:none; line-height:1.4;"></textarea>
                                 </div>
+                                <div id="quarantine-detail-response-container" style="display:none; flex-direction:column; gap:6px; font-size:11px; margin-top:8px;">
+                                    <strong style="color:#34d399; letter-spacing: 0.05em;">REDELIVERED RESPONSE:</strong>
+                                    <textarea id="quarantine-detail-response" readonly style="width:100%; height:120px; background:rgba(0,0,0,0.4); border:1px solid rgba(16,185,129,0.2); border-radius:4px; color:#34d399; font-family:'JetBrains Mono',monospace; padding:10px; font-size:11px; resize:none; outline:none; line-height:1.4;"></textarea>
+                                </div>
                                 <div style="display:flex; gap:12px; justify-content:flex-end; margin-top:8px;">
                                     <button class="btn" id="btn-quarantine-reject" onclick="actOnQuarantine('REJECT')" style="background:rgba(239,68,68,0.15); border-color:rgba(239,68,68,0.4); color:#f87171; height:32px; font-weight:600; cursor:pointer;">
                                         Permanently Block
@@ -1267,6 +1271,22 @@
                 }
             }
             document.getElementById("quarantine-detail-payload").value = payloadText;
+
+            const respContainer = document.getElementById("quarantine-detail-response-container");
+            if (item.last_payload && item.last_payload.raw_response) {
+                respContainer.style.display = "flex";
+                let responseText = "";
+                try {
+                    const parsed = JSON.parse(item.last_payload.raw_response);
+                    responseText = JSON.stringify(parsed, null, 2);
+                } catch (e) {
+                    responseText = item.last_payload.raw_response;
+                }
+                document.getElementById("quarantine-detail-response").value = responseText;
+            } else {
+                respContainer.style.display = "none";
+                document.getElementById("quarantine-detail-response").value = "";
+            }
 
             const isQuarantined = item.status === "QUARANTINED";
             document.getElementById("btn-quarantine-approve").disabled = !isQuarantined;

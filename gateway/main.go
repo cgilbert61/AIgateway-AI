@@ -2733,8 +2733,50 @@ func handleAPIQuarantineAction(w http.ResponseWriter, r *http.Request) {
 			state.Lock()
 			state.LeakyVFE = 0.0
 			state.CurrentAction = ACTION_ALLOW
+			
+			var lastPayload *PayloadDetail
+			if len(state.HistoryPayloads) > 0 {
+				lastPayload = &state.HistoryPayloads[len(state.HistoryPayloads)-1]
+			}
 			state.Unlock()
 			StoreSessionState(req.SessionID, state)
+
+			if lastPayload != nil && lastPayload.RawRequest != "" {
+				go func(sessID string, payload PayloadDetail) {
+					// Asynchronously redeliver the raw request to the upstream LLM
+					isAgentTool := strings.Contains(payload.RawRequest, `"tool"`) && strings.Contains(payload.RawRequest, `"arguments"`)
+					log.Printf("[QUARANTINE_REDELIVER] Redelivering raw request for session %s (isAgentTool: %t)...", sessID, isAgentTool)
+					
+					respBytes, statusCode, err := forwardToUpstream([]byte(payload.RawRequest), isAgentTool)
+					if err != nil {
+						log.Printf("[Error] Redelivery to upstream failed for session %s: %v", sessID, err)
+						return
+					}
+					
+					log.Printf("[QUARANTINE_REDELIVER] Upstream returned status %d (bytes: %d)", statusCode, len(respBytes))
+					
+					// Update memory cache with response so it can be retrieved by UI
+					valLatest, okLatest := sessionCache.Load(sessID)
+					if okLatest {
+						stateLatest := valLatest.(*ActiveInfState)
+						stateLatest.Lock()
+						for idx := len(stateLatest.HistoryPayloads) - 1; idx >= 0; idx-- {
+							if stateLatest.HistoryPayloads[idx].TxID == payload.TxID {
+								stateLatest.HistoryPayloads[idx].RawResponse = string(respBytes)
+								stateLatest.HistoryPayloads[idx].TranslatedResponse = string(respBytes)
+								break
+							}
+						}
+						stateLatest.Unlock()
+						StoreSessionState(sessID, stateLatest)
+					}
+					
+					// Insert new transaction entry and security log
+					newTxID := uuid.New().String()
+					_ = LogTransactionState(newTxID, sessID, 0, 0.0, 0.0, 0.0, false)
+					logSecurityAuditEvent(newTxID, sessID, "quarantine_redeliver", "SAFE", "REDELIVERED", 0.0, "ALLOW", false)
+				}(req.SessionID, *lastPayload)
+			}
 		}
 	}
 

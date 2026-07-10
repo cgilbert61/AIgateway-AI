@@ -264,6 +264,21 @@ def test_quarantine_block_and_release():
     print(f"Approve Action - Status Code: {resp_act.status_code}")
     assert resp_act.status_code == 200
 
+    # Wait for the async background redelivery worker to finish sending to upstream LLM
+    print("Waiting 2s for active background request redelivery...")
+    time.sleep(2)
+
+    # Verify that the response has been redelivered and updated in the queue list details
+    resp_list_after = requests.get(f"{BASE_URL}/api/quarantine/list")
+    assert resp_list_after.status_code == 200
+    items_after = resp_list_after.json()
+    matched_item = next((item for item in items_after if item["session_id"] == session_id), None)
+    assert matched_item is not None, "Quarantined item must still be searchable in list history"
+    assert matched_item["status"] == "APPROVED", "Incident status should be APPROVED"
+    assert matched_item.get("last_payload") is not None
+    assert "Mock Response: OpenAI parsed your prompt" in matched_item["last_payload"].get("raw_response", ""), "Redelivered raw response should be populated in last_payload"
+    print("Verification: Active Re-delivery successfully executed and saved upstream response!")
+
     resp_released = requests.post(f"{BASE_URL}/v1/chat/completions", headers=headers, json=payload)
     print(f"Released Request - Status Code: {resp_released.status_code}")
     assert resp_released.status_code == 200, "Released session request should succeed"
