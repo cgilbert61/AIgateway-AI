@@ -217,7 +217,10 @@ We completed a comprehensive load-testing round to address the simulation backup
 - **Integrated S3 API Endpoints**: Created backend handlers in [gateway/main.go](file:///c:/Users/chuck/AIAIAI/gateway/main.go) to listing buckets, objects, fetching raw payload content, and staging files directly from the UI.
 - **Glassmorphic UI Browser**: Added an **Add S3** purple cloud icon button in [gateway/dashboard/index.html](file:///c:/Users/chuck/AIAIAI/gateway/dashboard/index.html) that triggers a modal dialog. SOC analysts and developers can select buckets, browse file metadata, load payload bodies instantly into the request editor, and upload new test scripts to any bucket directly from the dashboard.
 
+### 6. OPA Monaco Playground & Sandboxed Simulator
+- **Monaco Code Editor**: Embedded the high-fidelity Monaco editor in [gateway/dashboard/playground.html](file:///c:/Users/chuck/AIAIAI/gateway/dashboard/playground.html) with custom OPA Rego grammar coloring, letting analysts edit policy rules on the fly.
+- **In-Memory OPA Interpreter**: Created backend API endpoint `/api/playground/simulate` which compiles and runs custom Rego policies against mock payloads completely in memory, guaranteeing ZERO write-mutation or performance interference with production rule sets.
+- **Transient Active Inference Sandbox**: If OPA simulation allows a payload, the simulator spins up a temporary, transient `ActiveInfState` instance in memory. It scans the payload tokens using L1 classifiers, updates L2 perception, selects actions using `SelectActionEFE`, and returns beliefs, VFE score, decided action, and plain English XAI explanations.
+- **Header Navigation Integration**: Added a prominent purple button `🛠️ OPA Playground` in [gateway/dashboard/index.html](file:///c:/Users/chuck/AIAIAI/gateway/dashboard/index.html) header for one-click access.
+
 ---
-
-
-
