@@ -1,0 +1,17 @@
+# Large deployment archives
+aiaiai_airgap_deployment.zip
+*.zip
+
+# Python caches and environments
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# Go compiled binaries
+gateway/gateway-proxy
+gateway-proxy
+
+# OS files
+.DS_Store
+Thumbs.db

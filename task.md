@@ -1,0 +1,5 @@
+- [x] Implement simulation manager and REST endpoints in `gateway/main.go`
+- [x] Implement `dispatchSimRequest` with mixed traffic profiles in `gateway/main.go`
+- [x] Integrate "Start 1000-Worker Sim" button and JS logic in `gateway/dashboard/index.html`
+- [x] Rebuild and restart docker containers to apply simulator changes
+- [x] Verify execution from the dashboard and monitor the results

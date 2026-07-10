@@ -1,0 +1,1304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>G1163RT System Configuration Portal</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #080a10;
+            --panel-bg: rgba(17, 22, 34, 0.7);
+            --border-color: rgba(255, 255, 255, 0.04);
+            --text-main: #f1f5f9;
+            --text-muted: #64748b;
+            --color-cyan: #06b6d4;
+            --color-magenta: #d946ef;
+            --color-emerald: #10b981;
+            --color-rose: #f43f5e;
+            --glow-cyan: 0 0 16px rgba(6, 182, 212, 0.4);
+            --glow-magenta: 0 0 16px rgba(217, 70, 239, 0.4);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            height: 100vh;
+            overflow-x: hidden;
+            overflow-y: auto;
+            position: relative;
+        }
+
+        /* Radial neon background glows */
+        body::before {
+            content: '';
+            position: absolute;
+            top: -20%;
+            left: -10%;
+            width: 50%;
+            height: 50%;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(6, 182, 212, 0.08) 0%, transparent 70%);
+            z-index: 0;
+            pointer-events: none;
+        }
+
+        body::after {
+            content: '';
+            position: absolute;
+            bottom: -10%;
+            right: -10%;
+            width: 60%;
+            height: 60%;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(217, 70, 239, 0.06) 0%, transparent 70%);
+            z-index: 0;
+            pointer-events: none;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 32px;
+            background: rgba(8, 10, 16, 0.9);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--border-color);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .logo-indicator {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background-color: var(--color-cyan);
+            box-shadow: var(--glow-cyan);
+        }
+
+        h1 {
+            font-size: 20px;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+            background: linear-gradient(135deg, #ffffff 0%, #cbd5e1 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .btn-back {
+            background: transparent;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            color: var(--text-main);
+            padding: 8px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 13px;
+            transition: all 0.2s ease;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn-back:hover {
+            background: rgba(255, 255, 255, 0.05);
+            border-color: rgba(255, 255, 255, 0.15);
+            transform: translateX(-2px);
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 32px auto;
+            padding: 0 24px;
+            display: grid;
+            grid-template-columns: 1.2fr 1fr;
+            gap: 32px;
+            position: relative;
+            z-index: 10;
+        }
+
+        .config-card {
+            background-color: var(--panel-bg);
+            backdrop-filter: blur(16px);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        }
+
+        .card-title {
+            font-size: 15px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-main);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            padding-bottom: 12px;
+            margin-bottom: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .section-tag {
+            font-size: 10px;
+            font-weight: 700;
+            padding: 3px 8px;
+            border-radius: 4px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .tag-cyan { background: rgba(6, 182, 212, 0.1); color: var(--color-cyan); border: 1px solid rgba(6, 182, 212, 0.2); }
+        .tag-magenta { background: rgba(217, 70, 239, 0.1); color: var(--color-magenta); border: 1px solid rgba(217, 70, 239, 0.2); }
+
+        .form-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .form-group.full-width {
+            grid-column: span 2;
+        }
+
+        .form-label {
+            font-size: 11px;
+            color: var(--text-muted);
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .form-input, .form-select {
+            background: rgba(15, 23, 42, 0.5);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 10px 12px;
+            font-family: inherit;
+            color: var(--text-main);
+            font-size: 13px;
+            outline: none;
+            transition: all 0.2s ease;
+            width: 100%;
+        }
+
+        .form-input:focus, .form-select:focus {
+            border-color: var(--color-cyan);
+            box-shadow: 0 0 10px rgba(6, 182, 212, 0.15);
+        }
+
+        /* Sliders Styling */
+        .slider-container {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            background: rgba(255, 255, 255, 0.015);
+            border: 1px solid rgba(255, 255, 255, 0.02);
+            border-radius: 8px;
+            padding: 12px;
+        }
+
+        .slider-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
+        }
+
+        .slider-title {
+            font-weight: 600;
+            color: #cbd5e1;
+        }
+
+        .slider-value {
+            font-family: 'JetBrains Mono', monospace;
+            font-weight: 700;
+            color: var(--color-cyan);
+        }
+
+        .slider-input {
+            width: 100%;
+            accent-color: var(--color-cyan);
+            height: 5px;
+            border-radius: 5px;
+            outline: none;
+            cursor: pointer;
+        }
+
+        .slider-desc {
+            font-size: 10px;
+            color: var(--text-muted);
+            line-height: 1.4;
+        }
+
+        /* OPA Policy Editor Styling */
+        .editor-container {
+            display: flex;
+            flex-direction: column;
+            background: #090b11;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            height: 550px;
+            overflow: hidden;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .editor-header {
+            padding: 10px 16px;
+            background: rgba(17, 22, 34, 0.9);
+            border-bottom: 1px solid var(--border-color);
+            font-size: 11px;
+            color: var(--text-muted);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .editor-body {
+            flex: 1;
+            display: flex;
+            position: relative;
+        }
+
+        .line-numbers {
+            width: 40px;
+            background: rgba(0, 0, 0, 0.2);
+            border-right: 1px solid rgba(255, 255, 255, 0.02);
+            padding: 12px 0;
+            text-align: right;
+            color: rgba(255, 255, 255, 0.15);
+            font-size: 12px;
+            user-select: none;
+            line-height: 1.5;
+        }
+
+        .code-textarea {
+            flex: 1;
+            background: transparent;
+            border: none;
+            outline: none;
+            color: #38bdf8; /* Soft blue */
+            padding: 12px 16px;
+            font-size: 12px;
+            line-height: 1.5;
+            resize: none;
+            overflow-y: auto;
+            font-family: inherit;
+        }
+
+        .btn-apply {
+            background: linear-gradient(135deg, var(--color-cyan) 0%, #0891b2 100%);
+            border: none;
+            color: #ffffff;
+            padding: 12px 24px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 700;
+            font-size: 13px;
+            transition: all 0.2s ease;
+            box-shadow: 0 4px 14px rgba(6, 182, 212, 0.3);
+            text-align: center;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .btn-apply:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 20px rgba(6, 182, 212, 0.5);
+        }
+
+        .btn-apply:active {
+            transform: translateY(0);
+        }
+
+        .toast-notification {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            background: rgba(16, 185, 129, 0.95);
+            border: 1px solid var(--color-emerald);
+            color: #ffffff;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 13px;
+            box-shadow: 0 8px 24px rgba(16, 185, 129, 0.3);
+            display: none;
+            z-index: 1000;
+            animation: slide-in 0.3s ease-out;
+        }
+
+        @keyframes slide-in {
+            from { transform: translateY(20px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+
+        /* Custom double column range inputs alignment */
+        .range-indicator {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 12px;
+            margin-top: 4px;
+        }
+
+        .range-sublabel {
+            font-size: 9px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="header-left">
+            <div class="logo-indicator"></div>
+            <h1>G1163RT Gateway Control Panel</h1>
+        </div>
+        <div style="display: flex; gap: 10px; align-items: center;">
+            <button class="btn-back" onclick="generateSecurityReport()" style="border-color: rgba(217, 70, 239, 0.6); color: rgb(217, 70, 239); cursor: pointer;">
+                <span>🐘 L4 Audit Report</span>
+            </button>
+            <a href="#" id="back-link" class="btn-back">
+                <span>←</span> Back to Analytics Dashboard
+            </a>
+        </div>
+    </header>
+
+    <div class="container">
+        <!-- LEFT COLUMN: System Variables, Credentials, Active Inference Sliders -->
+        <div class="config-card">
+            <!-- Part 1: General LLM Config -->
+            <div>
+                <div class="card-title">
+                    <span>Upstream LLM Provider Settings</span>
+                    <span class="section-tag tag-cyan">LLM ROUTING</span>
+                </div>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label class="form-label">Provider</label>
+                        <select id="llm-provider" class="form-select">
+                            <option value="mock">mock</option>
+                            <option value="gemini">gemini</option>
+                            <option value="anthropic">anthropic</option>
+                            <option value="openai">openai</option>
+                            <option value="grok">grok</option>
+                            <option value="ollama">ollama</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Default Model</label>
+                        <input type="text" id="llm-model" class="form-input">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Base URL</label>
+                        <input type="text" id="llm-url" class="form-input">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">API Key</label>
+                        <input type="password" id="llm-key" class="form-input" placeholder="Masked credentials">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Part 2: DLP Governance Settings -->
+            <div>
+                <div class="card-title">
+                    <span>DLP Governance Settings</span>
+                    <span class="section-tag tag-cyan">DATA LOSS PREVENTION</span>
+                </div>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label class="form-label">DLP Provider</label>
+                        <select id="dlp-provider" class="form-select">
+                            <option value="symantec">symantec</option>
+                            <option value="cyberhaven">cyberhaven</option>
+                            <option value="microsoft">microsoft</option>
+                            <option value="nightfall">nightfall</option>
+                            <option value="none">none</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">DLP Endpoint URL</label>
+                        <input type="text" id="dlp-url" class="form-input" placeholder="https://api.nightfall.ai/v3/scan">
+                    </div>
+                    <div class="form-group full-width">
+                        <label class="form-label">DLP API Key / Token</label>
+                        <input type="password" id="dlp-key" class="form-input" placeholder="Masked credentials">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Part 3: Active Inference Layer Sliders -->
+            <div>
+                <div class="card-title">
+                    <span>Active Inference Parameter Sliders</span>
+                    <button class="section-tag tag-magenta" onclick="resetActiveInferenceDefaults()" style="cursor:pointer; background:rgba(217, 70, 239, 0.15); border:1px solid rgba(217, 70, 239, 0.4); outline:none; transition: all 0.2s;">Reset Defaults</button>
+                </div>
+                <div style="display:flex; flex-direction:column; gap:16px;">
+                    <!-- L1 baseline Safe / Susp / Mal -->
+                    <div class="slider-container">
+                        <div class="slider-header">
+                            <span class="slider-title">Layer 1: Belief Reset Baselines</span>
+                            <span class="slider-value" id="l1-baseline-display">Safe: 95%, Susp: 4%, Mal: 1%</span>
+                        </div>
+                        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; margin-top:4px;">
+                            <div class="form-group">
+                                <label class="form-label" style="text-align:center;">Safe</label>
+                                <input type="range" id="l1-safe" min="0" max="100" value="95" class="slider-input" oninput="adjustL1Sliders('safe')">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label" style="text-align:center;">Suspicious</label>
+                                <input type="range" id="l1-susp" min="0" max="100" value="4" class="slider-input" oninput="adjustL1Sliders('susp')">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label" style="text-align:center;">Malicious</label>
+                                <input type="range" id="l1-mal" min="0" max="100" value="1" class="slider-input" oninput="adjustL1Sliders('mal')">
+                            </div>
+                        </div>
+                        <div class="slider-desc">Priors used to reset the Layer 1 state at the beginning of each request. The sliders auto-normalize to sum to 100%.</div>
+                    </div>
+
+                    <!-- L2 Decay slider -->
+                    <div class="slider-container">
+                        <div class="slider-header">
+                            <span class="slider-title">Layer 2: Leaky VFE Surprise Decay Rate (&lambda;<sub>2</sub>)</span>
+                            <span class="slider-value" id="l2-decay-display">0.35</span>
+                        </div>
+                        <input type="range" id="l2-decay" min="0.05" max="0.95" step="0.05" value="0.35" class="slider-input" oninput="document.getElementById('l2-decay-display').innerText=parseFloat(this.value).toFixed(2)">
+                        <div class="slider-desc">Controls how quickly accumulated VFE surprise decays over time. A decay rate of 0.35 equates to a half-life of ~2.0 seconds.</div>
+                    </div>
+
+                    <!-- L2 Precision slider -->
+                    <div class="slider-container">
+                        <div class="slider-header">
+                            <span class="slider-title">Layer 2: Policy Precision Gamma (&gamma;<sub>2</sub>)</span>
+                            <span class="slider-value" id="l2-precision-display">3.00</span>
+                        </div>
+                        <input type="range" id="l2-precision" min="1.0" max="20.0" step="0.5" value="3.0" class="slider-input" oninput="document.getElementById('l2-precision-display').innerText=parseFloat(this.value).toFixed(2)">
+                        <div class="slider-desc">Temperature parameter controlling the strictness of Layer 2's action selection. Higher values increase priority compliance checks.</div>
+                    </div>
+
+                    <!-- L3 Precision slider -->
+                    <div class="slider-container">
+                        <div class="slider-header">
+                            <span class="slider-title">Layer 3: Policy Precision Gamma (&gamma;<sub>3</sub>)</span>
+                            <span class="slider-value" id="l3-precision-display">15.00</span>
+                        </div>
+                        <input type="range" id="l3-precision" min="1.0" max="30.0" step="1.0" value="15.0" class="slider-input" oninput="document.getElementById('l3-precision-display').innerText=parseFloat(this.value).toFixed(2)">
+                        <div class="slider-desc">Precision temperature for Layer 3 Sidecar. Higher values lock the system assertively into threat containment states when anomalies recur.</div>
+                    </div>
+
+                    <!-- Layer 4 Slider -->
+                    <div class="slider-container" style="margin-top: 15px; padding-top: 15px; border-top: 1px dashed rgba(255,255,255,0.05);">
+                        <div class="slider-header">
+                            <span class="slider-title">Layer 4: Threat Containment Threshold (&theta;)</span>
+                            <span class="slider-value" id="l4-threat-display">Medium / Balanced (3.50)</span>
+                        </div>
+                        <input type="range" id="l4-threat-slider" min="1" max="4" step="1" value="2" class="slider-input" oninput="updateL4ThreatDisplay(this.value)" style="cursor: pointer; accent-color: var(--color-cyan);">
+                        <div class="slider-desc" id="l4-threat-desc"><strong>Medium / Balanced (θ = 3.5):</strong> Standard operations. Allows/redacts initial PII; blocks consecutive anomalies or threat violations.</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Part 4: Deduplication Sliders -->
+            <div>
+                <div class="card-title">
+                    <span>Double-Click Deduplication Settings</span>
+                    <span class="section-tag tag-cyan">CONCURRENCY SAFETY</span>
+                </div>
+                <div style="display:flex; flex-direction:column; gap:16px;">
+                    <div class="slider-container">
+                        <div class="slider-header">
+                            <span class="slider-title">Deduplication Time Window</span>
+                            <span class="slider-value" id="dup-window-display">500 ms</span>
+                        </div>
+                        <input type="range" id="dup-window" min="100" max="3000" step="100" value="500" class="slider-input" oninput="document.getElementById('dup-window-display').innerText=this.value+' ms'">
+                        <div class="slider-desc">Requests with matching payload hashes arriving within this window are treated as duplicate clicks and return cached responses immediately.</div>
+                    </div>
+
+                    <div class="slider-container">
+                        <div class="slider-header">
+                            <span class="slider-title">Max Consecutive Duplicates Allowed</span>
+                            <span class="slider-value" id="dup-limit-display">2</span>
+                        </div>
+                        <input type="range" id="dup-limit" min="1" max="10" step="1" value="2" class="slider-input" oninput="document.getElementById('dup-limit-display').innerText=this.value">
+                        <div class="slider-desc">Maximum duplicates allowed in a single burst before bypassing deduplication. Allows automated flood tests to bypass cache.</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Part 5: Cloud Provider Credentials -->
+            <div>
+                <div class="card-title">
+                    <span>Cloud Provider Integrations</span>
+                    <span class="section-tag tag-cyan">SECURITY ENVIRONMENT</span>
+                </div>
+                <div style="display:flex; flex-direction:column; gap:16px;">
+                    <!-- AWS -->
+                    <div style="border-bottom:1px solid rgba(255,255,255,0.03); padding-bottom:16px;">
+                        <span style="font-size:11px; font-weight:700; color:var(--color-cyan)">AWS CLOUD CREDENTIALS</span>
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:8px;">
+                            <div class="form-group">
+                                <label class="form-label">AWS Region</label>
+                                <input type="text" id="aws-region" class="form-input" placeholder="e.g. us-east-1">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Access Key ID</label>
+                                <input type="password" id="aws-key" class="form-input" placeholder="Masked credentials">
+                            </div>
+                            <div class="form-group full-width">
+                                <label class="form-label">Secret Access Key</label>
+                                <input type="password" id="aws-secret" class="form-input" placeholder="Masked credentials">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Azure -->
+                    <div style="border-bottom:1px solid rgba(255,255,255,0.03); padding-bottom:16px;">
+                        <span style="font-size:11px; font-weight:700; color:var(--color-emerald)">AZURE CLOUD CREDENTIALS</span>
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:8px;">
+                            <div class="form-group">
+                                <label class="form-label">Subscription ID</label>
+                                <input type="password" id="azure-sub" class="form-input" placeholder="Masked credentials">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Tenant ID</label>
+                                <input type="password" id="azure-tenant" class="form-input" placeholder="Masked credentials">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Client ID</label>
+                                <input type="password" id="azure-client" class="form-input" placeholder="Masked credentials">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Client Secret</label>
+                                <input type="password" id="azure-secret" class="form-input" placeholder="Masked credentials">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- GCP -->
+                    <div>
+                        <span style="font-size:11px; font-weight:700; color:var(--color-rose)">GCP CLOUD CREDENTIALS</span>
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:8px;">
+                            <div class="form-group">
+                                <label class="form-label">Project ID</label>
+                                <input type="text" id="gcp-project" class="form-input" placeholder="e.g. cloud-security-300">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Service Key File Path</label>
+                                <input type="text" id="gcp-keypath" class="form-input" placeholder="e.g. /app/config/gcp-key.json">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Part 6: Rogue Agent Fleet Authorization Panel -->
+            <div>
+                <div class="card-title">
+                    <span>Rogue Agent Fleet Control Panel</span>
+                    <span class="section-tag tag-rose" style="background: rgba(244, 63, 94, 0.15); border: 1px solid rgba(244, 63, 94, 0.4); color: #f43f5e;">AGENT SECURITY</span>
+                </div>
+                <div style="font-size: 12px; color: var(--text-muted); line-height: 1.5; margin-bottom: 12px;">
+                    List of 15 diagnostic agents. Toggle registration keys or trigger simulated requests. Unregistered/revoked agent keys will trigger security blocks.
+                </div>
+                <div style="max-height: 380px; overflow-y: auto; border: 1px solid rgba(255,255,255,0.03); border-radius: 8px; background: rgba(0,0,0,0.25); padding: 8px;">
+                    <table style="width: 100%; border-collapse: collapse; font-size: 12px; text-align: left;">
+                        <thead>
+                            <tr style="border-bottom: 1px solid rgba(255,255,255,0.05); color: var(--text-muted); font-weight: 600;">
+                                <th style="padding: 8px; font-family: inherit;">Agent Name / Key ID</th>
+                                <th style="padding: 8px; width: 120px;">Registration Status</th>
+                                <th style="padding: 8px; width: 180px; text-align: right;">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="agent-fleet-tbody">
+                            <!-- Populated dynamically by javascript -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Apply configs button -->
+            <button class="btn-apply" onclick="saveSystemConfiguration()">
+                <span>Apply System-Wide Configurations</span>
+            </button>
+        </div>
+
+        <!-- RIGHT COLUMN: OPA / Rego Code Window -->
+        <div class="config-card" style="position: sticky; top: 100px; height: fit-content;">
+            <div>
+                <div class="card-title">
+                    <span>Embedded OPA Policy Editor</span>
+                    <span class="section-tag tag-cyan">REGO COMPILE ENGINE</span>
+                </div>
+                <div style="font-size: 12px; color: var(--text-muted); line-height: 1.5; margin-bottom: 12px;">
+                    Directly view, modify, and override declarative role-based security rules and whitelists on disk.
+                </div>
+                
+                <div class="editor-container">
+                    <div class="editor-header">
+                        <span>/app/policies/tool_policy.rego</span>
+                        <span style="color:#34d399">NATIVE EMBEDDED</span>
+                    </div>
+                    <div class="editor-body">
+                        <div class="line-numbers" id="line-numbers-container">
+                            <!-- Populated by JS -->
+                        </div>
+                        <textarea class="code-textarea" id="policy-editor" spellcheck="false" oninput="updateLineNumbers()"></textarea>
+                    </div>
+                </div>
+            </div>
+
+            <button class="btn-apply" onclick="savePolicyConfiguration()" style="background: linear-gradient(135deg, var(--color-magenta) 0%, #be185d 100%); box-shadow: 0 4px 14px rgba(217, 70, 239, 0.3);">
+                <span>Save OPA/Rego Policy File</span>
+            </button>
+        </div>
+    </div>
+
+    <div class="toast-notification" id="toast-notify">Settings applied successfully!</div>
+
+    <script>
+        // Fetch configurations and policy on load
+        window.onload = function() {
+            document.getElementById("back-link").href = window.location.protocol + "//" + window.location.hostname + ":1173/";
+            loadConfigData();
+            loadPolicyData();
+            loadAgentFleetData();
+            updateLineNumbers();
+
+            // Auto-save sliders on release (change event)
+            const sliders = [
+                "l1-safe", "l1-susp", "l1-mal",
+                "l2-decay", "l2-precision", "l3-precision",
+                "dup-window", "dup-limit"
+            ];
+            sliders.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) {
+                    el.addEventListener("change", () => {
+                        saveSystemConfiguration();
+                    });
+                }
+            });
+        };
+
+        // Populate line numbers in the OPA code editor
+        function updateLineNumbers() {
+            const editor = document.getElementById("policy-editor");
+            const lines = editor.value.split('\n').length;
+            const container = document.getElementById("line-numbers-container");
+            container.innerHTML = "";
+            for (let i = 1; i <= lines; i++) {
+                container.innerHTML += i + "<br>";
+            }
+        }
+
+        // Adjust L1 sliders to auto-normalize to sum to 100%
+        function adjustL1Sliders(changed) {
+            let safe = parseInt(document.getElementById("l1-safe").value);
+            let susp = parseInt(document.getElementById("l1-susp").value);
+            let mal = parseInt(document.getElementById("l1-mal").value);
+
+            let total = safe + susp + mal;
+            if (total !== 100) {
+                // Keep the changed slider fixed, adjust the other two proportionally
+                let diff = 100 - parseInt(document.getElementById(`l1-${changed}`).value);
+                let otherSum = 0;
+                
+                if (changed === 'safe') {
+                    otherSum = susp + mal;
+                    if (otherSum > 0) {
+                        susp = Math.round((susp / otherSum) * diff);
+                        mal = diff - susp;
+                    } else {
+                        susp = Math.round(diff / 2);
+                        mal = diff - susp;
+                    }
+                    document.getElementById("l1-susp").value = susp;
+                    document.getElementById("l1-mal").value = mal;
+                } else if (changed === 'susp') {
+                    otherSum = safe + mal;
+                    if (otherSum > 0) {
+                        safe = Math.round((safe / otherSum) * diff);
+                        mal = diff - safe;
+                    } else {
+                        safe = Math.round(diff / 2);
+                        mal = diff - safe;
+                    }
+                    document.getElementById("l1-safe").value = safe;
+                    document.getElementById("l1-mal").value = mal;
+                } else if (changed === 'mal') {
+                    otherSum = safe + susp;
+                    if (otherSum > 0) {
+                        safe = Math.round((safe / otherSum) * diff);
+                        susp = diff - safe;
+                    } else {
+                        safe = Math.round(diff / 2);
+                        susp = diff - safe;
+                    }
+                    document.getElementById("l1-safe").value = safe;
+                    document.getElementById("l1-susp").value = susp;
+                }
+            }
+
+            safe = document.getElementById("l1-safe").value;
+            susp = document.getElementById("l1-susp").value;
+            mal = document.getElementById("l1-mal").value;
+            document.getElementById("l1-baseline-display").innerText = `Safe: ${safe}%, Susp: ${susp}%, Mal: ${mal}%`;
+        }
+
+        // Fetch configs from backend
+        async function loadConfigData() {
+            try {
+                const r = await fetch("/api/system/status");
+                if (!r.ok) return;
+                const status = await r.json();
+
+                // Upstream LLM
+                document.getElementById("llm-provider").value = status.provider || "mock";
+                document.getElementById("llm-model").value = status.default_model || "";
+                document.getElementById("llm-url").value = status.base_url || "";
+                document.getElementById("llm-key").value = status.api_key_masked || "";
+
+                // DLP
+                document.getElementById("dlp-provider").value = status.dlp_provider || "none";
+                document.getElementById("dlp-url").value = status.dlp_endpoint || "";
+                document.getElementById("dlp-key").value = status.dlp_api_key || "";
+
+                // AWS
+                document.getElementById("aws-region").value = status.cloud_aws_region || "";
+                document.getElementById("aws-key").value = status.cloud_aws_access_key || "";
+                document.getElementById("aws-secret").value = status.cloud_aws_secret_key || "";
+
+                // Azure
+                document.getElementById("azure-sub").value = status.cloud_azure_subscription || "";
+                document.getElementById("azure-tenant").value = status.cloud_azure_tenant || "";
+                document.getElementById("azure-client").value = status.cloud_azure_client_id || "";
+                document.getElementById("azure-secret").value = status.cloud_azure_client_secret || "";
+
+                // GCP
+                document.getElementById("gcp-project").value = status.cloud_gcp_project || "";
+                document.getElementById("gcp-keypath").value = status.cloud_gcp_key_path || "";
+
+                // Sliders: L1 baselines (Safe/Susp/Mal)
+                const safeVal = Math.round((status.l1_baseline_safe || 0.95) * 100);
+                const suspVal = Math.round((status.l1_baseline_susp || 0.04) * 100);
+                const malVal = 100 - safeVal - suspVal;
+                document.getElementById("l1-safe").value = safeVal;
+                document.getElementById("l1-susp").value = suspVal;
+                document.getElementById("l1-mal").value = malVal;
+                document.getElementById("l1-baseline-display").innerText = `Safe: ${safeVal}%, Susp: ${suspVal}%, Mal: ${malVal}%`;
+
+                // Slider: L2 decay
+                const decayVal = status.l2_decay_rate || 0.35;
+                document.getElementById("l2-decay").value = decayVal;
+                document.getElementById("l2-decay-display").innerText = decayVal.toFixed(2);
+
+                // Slider: L2 precision
+                const l2PrecVal = status.l2_precision_gamma || 3.0;
+                document.getElementById("l2-precision").value = l2PrecVal;
+                document.getElementById("l2-precision-display").innerText = l2PrecVal.toFixed(2);
+
+                // Slider: L3 precision
+                const l3PrecVal = status.l3_precision_gamma || 15.0;
+                document.getElementById("l3-precision").value = l3PrecVal;
+                document.getElementById("l3-precision-display").innerText = l3PrecVal.toFixed(2);
+
+                // Slider: L4 Threat Containment
+                const thetaVal = status.l4_threat_threshold || 3.5;
+                let sliderVal = 2;
+                if (thetaVal >= 4.5) sliderVal = 1;
+                else if (thetaVal >= 3.0) sliderVal = 2;
+                else if (thetaVal >= 1.5) sliderVal = 3;
+                else sliderVal = 4;
+                document.getElementById("l4-threat-slider").value = sliderVal;
+                updateL4ThreatDisplay(sliderVal);
+
+                // Slider: Deduplication
+                const windowVal = status.deduplicate_window_ms || 500;
+                document.getElementById("dup-window").value = windowVal;
+                document.getElementById("dup-window-display").innerText = windowVal + " ms";
+
+                const limitVal = status.deduplicate_limit || 2;
+                document.getElementById("dup-limit").value = limitVal;
+                document.getElementById("dup-limit-display").innerText = limitVal;
+
+            } catch (e) {
+                console.error("Failed to load configs", e);
+            }
+        }
+
+        // Fetch OPA policy text
+        async function loadPolicyData() {
+            try {
+                const r = await fetch("/api/policy");
+                if (!r.ok) return;
+                const data = await r.json();
+                document.getElementById("policy-editor").value = data.policy || "";
+                updateLineNumbers();
+            } catch (e) {
+                console.error("Failed to load Rego policy", e);
+            }
+        }
+
+        // Save entire configuration to backend
+        async function saveSystemConfiguration() {
+            const payload = {
+                provider: document.getElementById("llm-provider").value,
+                default_model: document.getElementById("llm-model").value,
+                base_url: document.getElementById("llm-url").value,
+                api_key: document.getElementById("llm-key").value,
+
+                dlp_provider: document.getElementById("dlp-provider").value,
+                dlp_endpoint: document.getElementById("dlp-url").value,
+                dlp_api_key: document.getElementById("dlp-key").value,
+
+                cloud_aws_region: document.getElementById("aws-region").value,
+                cloud_aws_access_key: document.getElementById("aws-key").value,
+                cloud_aws_secret_key: document.getElementById("aws-secret").value,
+
+                cloud_azure_subscription: document.getElementById("azure-sub").value,
+                cloud_azure_tenant: document.getElementById("azure-tenant").value,
+                cloud_azure_client_id: document.getElementById("azure-client").value,
+                cloud_azure_client_secret: document.getElementById("azure-secret").value,
+
+                cloud_gcp_project: document.getElementById("gcp-project").value,
+                cloud_gcp_key_path: document.getElementById("gcp-keypath").value,
+
+                // Sliders parameters (convert percentages back to float fractions)
+                l1_baseline_safe: parseFloat(document.getElementById("l1-safe").value) / 100,
+                l1_baseline_susp: parseFloat(document.getElementById("l1-susp").value) / 100,
+                l1_baseline_mal: parseFloat(document.getElementById("l1-mal").value) / 100,
+
+                l2_decay_rate: parseFloat(document.getElementById("l2-decay").value),
+                l2_precision_gamma: parseFloat(document.getElementById("l2-precision").value),
+                l3_precision_gamma: parseFloat(document.getElementById("l3-precision").value),
+
+                l4_threat_threshold: (() => {
+                    const val = parseInt(document.getElementById("l4-threat-slider").value);
+                    if (val === 1) return 5.0;
+                    if (val === 2) return 3.5;
+                    if (val === 3) return 2.0;
+                    return 0.5;
+                })(),
+
+                deduplicate_window_ms: parseInt(document.getElementById("dup-window").value),
+                deduplicate_limit: parseInt(document.getElementById("dup-limit").value)
+            };
+
+            try {
+                const r = await fetch("/api/config", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload)
+                });
+                if (r.ok) {
+                    showToastNotification("System configurations applied successfully!");
+                    loadConfigData(); // Reload to show masked credentials updated
+                } else {
+                    const text = await r.text();
+                    alert("Error saving configuration: " + text);
+                }
+            } catch (e) {
+                alert("Failed to save configuration: " + e);
+            }
+        }
+
+        // Save OPA policy file to backend
+        async function savePolicyConfiguration() {
+            const policyText = document.getElementById("policy-editor").value;
+            try {
+                const r = await fetch("/api/policy", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ policy: policyText })
+                });
+                if (r.ok) {
+                    showToastNotification("OPA/Rego policy file saved successfully!");
+                } else {
+                    const text = await r.text();
+                    alert("Error saving policy: " + text);
+                }
+            } catch (e) {
+                alert("Failed to save policy: " + e);
+            }
+        }
+
+        // Display confirmation toast
+        function showToastNotification(message) {
+            const toast = document.getElementById("toast-notify");
+            toast.innerText = message;
+            toast.style.display = "block";
+            setTimeout(() => {
+                toast.style.display = "none";
+            }, 3000);
+        }
+
+        // Reset Active Inference parameters to safe factory defaults
+        async function resetActiveInferenceDefaults() {
+            if (!confirm("Are you sure you want to reset all Active Inference and Deduplication parameters to factory defaults?")) {
+                return;
+            }
+
+            // L1 Baseline defaults
+            const safeSlider = document.getElementById("l1-safe");
+            const suspSlider = document.getElementById("l1-susp");
+            const malSlider = document.getElementById("l1-mal");
+            
+            safeSlider.value = 95;
+            suspSlider.value = 4;
+            malSlider.value = 1;
+            
+            // Trigger auto-normalization baseline display updates
+            adjustL1Sliders('safe');
+
+            // L2 Decay default
+            const decaySlider = document.getElementById("l2-decay");
+            decaySlider.value = 0.35;
+            decaySlider.dispatchEvent(new Event('input'));
+
+            // L2 Precision default
+            const l2pSlider = document.getElementById("l2-precision");
+            l2pSlider.value = 3.0;
+            l2pSlider.dispatchEvent(new Event('input'));
+
+            // L3 Precision default
+            const l3pSlider = document.getElementById("l3-precision");
+            l3pSlider.value = 15.0;
+            l3pSlider.dispatchEvent(new Event('input'));
+
+            // Deduplication defaults
+            const dupWSlider = document.getElementById("dup-window");
+            dupWSlider.value = 500;
+            dupWSlider.dispatchEvent(new Event('input'));
+
+            const dupLSlider = document.getElementById("dup-limit");
+            dupLSlider.value = 2;
+            dupLSlider.dispatchEvent(new Event('input'));
+
+            // Save immediately
+            await saveSystemConfiguration();
+            showToastNotification("Parameters reset to factory defaults!");
+        }
+
+        // Load Agent Fleet data from DB
+        async function loadAgentFleetData() {
+            try {
+                const r = await fetch("/api/agents");
+                if (!r.ok) return;
+                const agents = await r.json();
+                
+                const tbody = document.getElementById("agent-fleet-tbody");
+                tbody.innerHTML = "";
+                
+                agents.forEach(agent => {
+                    const row = document.createElement("tr");
+                    row.style.borderBottom = "1px solid rgba(255,255,255,0.02)";
+                    
+                    const statusText = agent.is_active ? "REGISTERED" : "REVOKED";
+                    const statusClass = agent.is_active ? "tag-cyan" : "tag-rose";
+                    const statusStyle = agent.is_active 
+                        ? "background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3); font-size: 9px; font-weight:700; padding: 2px 6px; border-radius: 4px; display:inline-block;"
+                        : "background: rgba(244, 63, 94, 0.15); color: #f43f5e; border: 1px solid rgba(244, 63, 94, 0.3); font-size: 9px; font-weight:700; padding: 2px 6px; border-radius: 4px; display:inline-block;";
+
+                    const toggleLabel = agent.is_active ? "Revoke Key" : "Register Key";
+                    const btnClass = agent.is_active ? "btn-revoke" : "btn-register";
+                    const btnStyle = agent.is_active
+                        ? "background: rgba(244, 63, 94, 0.1); color: #f43f5e; border: 1px solid rgba(244, 63, 94, 0.3); padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 10px; font-family: inherit; font-weight: 600; margin-right: 6px; transition: all 0.2s;"
+                        : "background: rgba(16, 185, 129, 0.1); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3); padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 10px; font-family: inherit; font-weight: 600; margin-right: 6px; transition: all 0.2s;";
+
+                    const isRunning = !!agent.loop_active;
+                    const triggerLabel = isRunning ? "Stop Agent" : "Start Agent";
+                    const triggerStyle = isRunning
+                        ? "background: rgba(244, 63, 94, 0.1); color: #f43f5e; border: 1px solid rgba(244, 63, 94, 0.3); padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 10px; font-family: inherit; font-weight: 600; transition: all 0.2s;"
+                        : "background: rgba(6, 182, 212, 0.1); color: #06b6d4; border: 1px solid rgba(6, 182, 212, 0.3); padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 10px; font-family: inherit; font-weight: 600; transition: all 0.2s;";
+
+                    row.innerHTML = `
+                        <td style="padding: 10px 8px;">
+                            <div style="font-weight: 600; color: #cbd5e1;">${agent.agent_name}</div>
+                            <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text-muted); margin-top: 2px;">${agent.key_id}</div>
+                        </td>
+                        <td style="padding: 10px 8px; vertical-align: middle;">
+                            <span style="${statusStyle}">${statusText}</span>
+                        </td>
+                        <td style="padding: 10px 8px; text-align: right; vertical-align: middle;">
+                            <button style="${btnStyle}" onclick="toggleAgentRegistration('${agent.key_id}', ${!agent.is_active})">${toggleLabel}</button>
+                            <button id="trigger-btn-${agent.key_id}" style="${triggerStyle}" onclick="toggleAgentTrigger('${agent.key_id}', ${isRunning})">${triggerLabel}</button>
+                        </td>
+                    `;
+                    tbody.appendChild(row);
+                });
+            } catch (e) {
+                console.error("Failed to load agent fleet", e);
+            }
+        }
+
+        // Toggle registration status
+        async function toggleAgentRegistration(keyId, isActive) {
+            try {
+                const r = await fetch("/api/agents/toggle", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ key_id: keyId, is_active: isActive })
+                });
+                if (r.ok) {
+                    showToastNotification(`Agent key '${keyId}' registration toggled successfully!`);
+                    loadAgentFleetData();
+                }
+            } catch (e) {
+                console.error("Failed to toggle agent registration", e);
+            }
+        }
+
+        async function toggleAgentTrigger(keyId, currentlyRunning) {
+            if (currentlyRunning) {
+                // Stop backend loop
+                try {
+                    const r = await fetch("/api/agents/loop/stop", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ key_id: keyId })
+                    });
+                    if (r.ok) {
+                        showToastNotification(`Agent '${keyId}' Go loop stopped.`);
+                        loadAgentFleetData();
+                    }
+                } catch (e) {
+                    console.error("Failed to stop agent loop", e);
+                }
+            } else {
+                // Start backend loop
+                try {
+                    const r = await fetch("/api/agents/loop/start", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ key_id: keyId })
+                    });
+                    if (r.ok) {
+                        showToastNotification(`Agent '${keyId}' Go loop started!`);
+                        loadAgentFleetData();
+                    }
+                } catch (e) {
+                    console.error("Failed to start agent loop", e);
+                }
+            }
+        }
+
+        function updateL4ThreatDisplay(val) {
+            const v = parseInt(val);
+            const display = document.getElementById("l4-threat-display");
+            const desc = document.getElementById("l4-threat-desc");
+            if (!display || !desc) return;
+
+            if (v === 1) {
+                display.innerText = "Low / Audit Mode (5.00)";
+                display.style.color = "#06b6d4";
+                desc.innerHTML = "<strong>Low / Audit Mode (θ = 5.0):</strong> Bypasses active blocks. Logs and reports all Layer 1/2 syntactic surprises while ensuring baseline PII is redacted.";
+            } else if (v === 2) {
+                display.innerText = "Medium / Balanced (3.50)";
+                display.style.color = "var(--color-cyan)";
+                desc.innerHTML = "<strong>Medium / Balanced (θ = 3.5):</strong> Balanced operations (default). Automatically redacts PII; raises suspicious escalation, and enforces containment blocks on consecutive anomalies.";
+            } else if (v === 3) {
+                display.innerText = "High / Strict (2.00)";
+                display.style.color = "#f59e0b";
+                desc.innerHTML = "<strong>High / Strict (θ = 2.0):</strong> Strict security profile. Decreases surprise tolerance; escalates containment blocks on first signs of credential or tool abuse.";
+            } else if (v === 4) {
+                display.innerText = "Critical / Lockdown (0.50)";
+                display.style.color = "#ef4444";
+                desc.innerHTML = "<strong>Critical / Lockdown (θ = 0.5):</strong> Emergency containment mode. Enforces absolute blocks on any anomaly or minor policy mismatch on first occurrence.";
+            }
+        }
+
+        async function generateSecurityReport() {
+            const existing = document.getElementById("security-report-modal");
+            if (existing) existing.remove();
+
+            let entityRowsHTML = `<tr><td colspan="5" style="text-align:center; padding:10px; color:var(--text-muted);">No cross-session entities tracked yet.</td></tr>`;
+            try {
+                const resp = await fetch("/api/l4/report");
+                if (resp.ok) {
+                    const data = await resp.json();
+                    if (data && data.length > 0) {
+                        entityRowsHTML = data.map(e => {
+                            const keyDisplay = e.entity_key.length > 25 ? e.entity_key.substring(0, 15) + "..." : e.entity_key;
+                            const timeStr = new Date(e.last_active_at).toLocaleTimeString();
+                            return `
+                                <tr style="border-bottom: 1px solid rgba(255,255,255,0.02);">
+                                    <td style="padding:6px 0; font-family:monospace; color:#06b6d4;">${keyDisplay}</td>
+                                    <td style="padding:6px 0; text-align:right; font-family:monospace; color:#d946ef;">${e.accumulated_surprise.toFixed(4)}</td>
+                                    <td style="padding:6px 0; text-align:right; color:#fff;">${e.total_requests}</td>
+                                    <td style="padding:6px 0; text-align:right; color:#ef4444; font-weight:700;">${e.total_blocks}</td>
+                                    <td style="padding:6px 0; text-align:right; color:var(--text-muted);">${timeStr}</td>
+                                </tr>
+                            `;
+                        }).join("");
+                    }
+                }
+            } catch (e) {
+                console.error("Failed to load L4 report", e);
+            }
+
+            let logs = [];
+            try {
+                const resp = await fetch("/api/logs?limit=500");
+                if (resp.ok) {
+                    logs = await resp.json();
+                }
+            } catch (e) {
+                console.error("Failed to load logs", e);
+            }
+
+            const totalCount = logs.length;
+            let blockCount = 0;
+            let piiCount = 0;
+            let rateLimitCount = 0;
+            let sumL1Vfe = 0;
+            let sumL2Vfe = 0;
+
+            logs.forEach(l => {
+                if (l.is_blocked) blockCount++;
+                sumL1Vfe += l.vfe_score_l1 || 0.0;
+                sumL2Vfe += l.vfe_score || 0.0;
+
+                const obs = l.observation_vector ? l.observation_vector[0] : -1;
+                if (obs === 2) {
+                    piiCount++;
+                } else if (obs === 3) {
+                    rateLimitCount++;
+                }
+            });
+
+            const avgL1Vfe = totalCount > 0 ? (sumL1Vfe / totalCount).toFixed(4) : "0.0000";
+            const avgL2Vfe = totalCount > 0 ? (sumL2Vfe / totalCount).toFixed(4) : "0.0000";
+
+            const threatLevel = blockCount > 5 ? "CRITICAL ALERT" : (blockCount > 0 ? "SUSPICIOUS ESCALATION" : "SAFE / BALANCED");
+            const threatColor = blockCount > 5 ? "#ef4444" : (blockCount > 0 ? "#f59e0b" : "#10b981");
+
+            const modal = document.createElement("div");
+            modal.id = "security-report-modal";
+            modal.style = `
+                position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+                background: rgba(10, 15, 30, 0.85); backdrop-filter: blur(8px);
+                display: flex; justify-content: center; align-items: center;
+                z-index: 10000; font-family: 'Outfit', sans-serif;
+            `;
+
+            modal.innerHTML = `
+                <div style="
+                    background: rgba(22, 30, 49, 0.95);
+                    border: 1px solid rgba(217, 70, 239, 0.25);
+                    border-radius: 12px; width: 620px; padding: 25px;
+                    display: flex; flex-direction: column; gap: 15px;
+                    box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5);
+                    color: #e2e8f0;
+                ">
+                    <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.08); padding-bottom:10px;">
+                        <span style="font-size:15px; font-weight:700; color:#d946ef; display:flex; align-items:center; gap:8px;">
+                            🐘 Organization Security Audit Report (Layer 4)
+                        </span>
+                        <span style="font-size:9px; text-transform:uppercase; background:rgba(217,70,239,0.1); border:1px solid rgba(217,70,239,0.2); color:#d946ef; padding:2px 6px; border-radius:4px; font-weight:700;">
+                            THE ELEPHANT
+                        </span>
+                    </div>
+
+                    <div style="display:grid; grid-template-columns:1.5fr 1fr; gap:12px;">
+                        <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.05); padding:10px; border-radius:6px;">
+                            <div style="font-size:9px; color:var(--text-muted); font-weight:700; text-transform:uppercase;">Decoupled Timescale Architecture</div>
+                            <div style="font-size:11px; color:#cbd5e1; margin-top:4px; line-height:1.4;">
+                                Layer 4 operates on a cross-session timescale (λ4 = 0.00001, half-life &approx; 19 hours) to decay organizational entity memories.
+                            </div>
+                        </div>
+                        <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.05); padding:10px; border-radius:6px; text-align:center; display:flex; flex-direction:column; justify-content:center;">
+                            <div style="font-size:9px; color:var(--text-muted); font-weight:700; text-transform:uppercase;">Overall Threat Profile</div>
+                            <div style="font-size:14px; font-weight:700; color:${threatColor}; margin-top:4px;">${threatLevel}</div>
+                        </div>
+                    </div>
+
+                    <div>
+                        <div style="font-size:10px; color:#d946ef; font-weight:700; text-transform:uppercase; margin-bottom:8px; letter-spacing:0.5px;">Top Monitored Entities (Cross-Session Watchlist)</div>
+                        <div style="background:rgba(255,255,255,0.01); border:1px solid rgba(255,255,255,0.04); border-radius:6px; padding:10px; max-height:150px; overflow-y:auto;">
+                            <table style="width:100%; border-collapse:collapse; font-size:10px; text-align:left;">
+                                <thead>
+                                    <tr style="border-bottom:1px solid rgba(255,255,255,0.06); color:var(--text-muted);">
+                                        <th style="padding-bottom:6px;">Entity (IP / Token)</th>
+                                        <th style="padding-bottom:6px; text-align:right;">Decayed Surprise</th>
+                                        <th style="padding-bottom:6px; text-align:right;">Requests</th>
+                                        <th style="padding-bottom:6px; text-align:right;">Blocks</th>
+                                        <th style="padding-bottom:6px; text-align:right;">Last Active</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${entityRowsHTML}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div>
+                        <div style="font-size:10px; color:#06b6d4; font-weight:700; text-transform:uppercase; margin-bottom:8px; letter-spacing:0.5px;">Global System Telemetry (Last 500 Actions)</div>
+                        <div style="background:rgba(255,255,255,0.01); border:1px solid rgba(255,255,255,0.04); border-radius:6px; padding:12px;">
+                            <table style="width:100%; border-collapse:collapse; font-size:11px;">
+                                <tr style="border-bottom:1px solid rgba(255,255,255,0.04);">
+                                    <td style="padding:4px 0; color:var(--text-muted);">Active Inference Blocks Enforced</td>
+                                    <td style="padding:4px 0; text-align:right; font-weight:700; color:#ef4444;">${blockCount}</td>
+                                </tr>
+                                <tr style="border-bottom:1px solid rgba(255,255,255,0.04);">
+                                    <td style="padding:4px 0; color:var(--text-muted);">PII / Injection Flags Raised</td>
+                                    <td style="padding:4px 0; text-align:right; font-weight:700; color:#f59e0b;">${piiCount}</td>
+                                </tr>
+                                <tr style="border-bottom:1px solid rgba(255,255,255,0.04);">
+                                    <td style="padding:4px 0; color:var(--text-muted);">Rate Limit Floods Trapped</td>
+                                    <td style="padding:4px 0; text-align:right; font-weight:700; color:#3b82f6;">${rateLimitCount}</td>
+                                </tr>
+                                <tr style="border-bottom:1px solid rgba(255,255,255,0.04);">
+                                    <td style="padding:4px 0; color:var(--text-muted);">Average L1 Syntactic Surprise</td>
+                                    <td style="padding:4px 0; text-align:right; font-family:monospace; color:#06b6d4;">${avgL1Vfe}</td>
+                                </tr>
+                                <tr>
+                                    <td style="padding:4px 0; color:var(--text-muted);">Average L2 Compliance Surprise</td>
+                                    <td style="padding:4px 0; text-align:right; font-family:monospace; color:#d946ef;">${avgL2Vfe}</td>
+                                </tr>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:5px;">
+                        <button class="btn" onclick="document.getElementById('security-report-modal').remove()" style="margin:0; background:rgba(255,255,255,0.05); border-color:rgba(255,255,255,0.1); color:#fff; width:80px; height:28px; font-size:11px; justify-content:center; cursor:pointer;">Close</button>
+                        <button class="btn btn-primary" onclick="window.print()" style="margin:0; width:80px; height:28px; font-size:11px; justify-content:center; cursor:pointer;">Print</button>
+                    </div>
+                </div>
+            `;
+
+            document.body.appendChild(modal);
+        }
+    </script>
+</body>
+</html>

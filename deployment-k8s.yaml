@@ -1,0 +1,304 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aiaiai-redis
+  labels:
+    app: aiaiai-redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: aiaiai-redis
+  template:
+    metadata:
+      labels:
+        app: aiaiai-redis
+    spec:
+      containers:
+      - name: redis
+        image: redis:7-alpine
+        ports:
+        - containerPort: 6379
+        resources:
+          limits:
+            cpu: "500m"
+            memory: "256Mi"
+          requests:
+            cpu: "100m"
+            memory: "64Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: aiaiai-redis
+spec:
+  ports:
+  - port: 6379
+    targetPort: 6379
+  selector:
+    app: aiaiai-redis
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aiaiai-postgres
+  labels:
+    app: aiaiai-postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: aiaiai-postgres
+  template:
+    metadata:
+      labels:
+        app: aiaiai-postgres
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:15
+        args: ["-c", "max_connections=150"]
+        env:
+        - name: POSTGRES_USER
+          value: user
+        - name: POSTGRES_PASSWORD
+          value: password
+        - name: POSTGRES_DB
+          value: postgres
+        ports:
+        - containerPort: 5432
+        resources:
+          limits:
+            cpu: "1"
+            memory: "512Mi"
+          requests:
+            cpu: "250m"
+            memory: "256Mi"
+        volumeMounts:
+        - name: init-db-volume
+          mountPath: /docker-entrypoint-initdb.d/init-db.sh
+          subPath: init-db.sh
+        - name: schema-volume
+          mountPath: /tmp/schema.sql
+          subPath: schema.sql
+      volumes:
+      - name: init-db-volume
+        hostPath:
+          path: /run/desktop/mnt/host/c/Users/chuck/AIAIAI/database
+          type: Directory
+      - name: schema-volume
+        hostPath:
+          path: /run/desktop/mnt/host/c/Users/chuck/AIAIAI/database
+          type: Directory
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: aiaiai-postgres
+spec:
+  ports:
+  - port: 5432
+    targetPort: 5432
+  selector:
+    app: aiaiai-postgres
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aiaiai-gateway
+  labels:
+    app: aiaiai-gateway
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: aiaiai-gateway
+  template:
+    metadata:
+      labels:
+        app: aiaiai-gateway
+    spec:
+      containers:
+      - name: gateway-proxy
+        image: aiaiai-aiaiai_gateway:latest
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: DATABASE_URL
+          value: postgresql://user:password@aiaiai-postgres:5432/postgres?sslmode=disable
+        - name: REDIS_URL
+          value: aiaiai-redis:6379
+        - name: DEFAULT_MATRICES_PATH
+          value: /app/config/default_matrices.json
+        - name: GATEWAY_CONFIG_PATH
+          value: /app/config/gateway_config.json
+        - name: PORT
+          value: "1163"
+        - name: UPSTREAM_URL
+          value: http://aiaiai-mock-llm:8081
+        ports:
+        - containerPort: 1173
+          name: api-port
+        - containerPort: 1163
+          name: config-port
+        resources:
+          limits:
+            cpu: "1"
+            memory: "1536Mi"
+          requests:
+            cpu: "250m"
+            memory: "256Mi"
+        volumeMounts:
+        - name: config-volume
+          mountPath: /app/config
+      volumes:
+      - name: config-volume
+        hostPath:
+          path: /run/desktop/mnt/host/c/Users/chuck/AIAIAI/config
+          type: Directory
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: aiaiai-gateway
+spec:
+  ports:
+  - name: api
+    port: 1173
+    targetPort: 1173
+  - name: config
+    port: 1163
+    targetPort: 1163
+  selector:
+    app: aiaiai-gateway
+  type: LoadBalancer
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aiaiai-sidecar
+  labels:
+    app: aiaiai-sidecar
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: aiaiai-sidecar
+  template:
+    metadata:
+      labels:
+        app: aiaiai-sidecar
+    spec:
+      containers:
+      - name: python-sidecar
+        image: aiaiai-aiaiai_sidecar:latest
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: DATABASE_URL
+          value: postgresql://user:password@aiaiai-postgres:5432/postgres?sslmode=disable
+        - name: GATEWAY_URL
+          value: http://aiaiai-gateway:1163
+        resources:
+          limits:
+            cpu: "500m"
+            memory: "256Mi"
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+        volumeMounts:
+        - name: config-volume
+          mountPath: /app/config
+      volumes:
+      - name: config-volume
+        hostPath:
+          path: /run/desktop/mnt/host/c/Users/chuck/AIAIAI/config
+          type: Directory
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: aiaiai-sidecar
+spec:
+  ports:
+  - port: 5001
+    targetPort: 5001
+  selector:
+    app: aiaiai-sidecar
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: aiaiai-gateway-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: aiaiai-gateway
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 75
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: aiaiai-sidecar-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: aiaiai-sidecar
+  minReplicas: 2
+  maxReplicas: 8
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 80
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aiaiai-mock-llm
+  labels:
+    app: aiaiai-mock-llm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: aiaiai-mock-llm
+  template:
+    metadata:
+      labels:
+        app: aiaiai-mock-llm
+    spec:
+      containers:
+      - name: mock-llm
+        image: aiaiai-aiaiai_mock_llm:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8081
+        resources:
+          limits:
+            cpu: "200m"
+            memory: "128Mi"
+          requests:
+            cpu: "50m"
+            memory: "64Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: aiaiai-mock-llm
+spec:
+  ports:
+  - port: 8081
+    targetPort: 8081
+  selector:
+    app: aiaiai-mock-llm

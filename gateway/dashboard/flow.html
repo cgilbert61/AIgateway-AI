@@ -1,0 +1,885 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Active Inference Gateway - Visual Flow Walkthrough</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #080a10;
+            --panel-bg: rgba(17, 22, 34, 0.75);
+            --border-color: rgba(255, 255, 255, 0.05);
+            --text-main: #f1f5f9;
+            --text-muted: #64748b;
+            --color-cyan: #06b6d4;
+            --color-magenta: #d946ef;
+            --color-emerald: #10b981;
+            --color-rose: #f43f5e;
+            --glow-cyan: 0 0 16px rgba(6, 182, 212, 0.35);
+            --glow-magenta: 0 0 16px rgba(217, 70, 239, 0.35);
+            --glow-rose: 0 0 16px rgba(244, 63, 94, 0.35);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            min-height: 100vh;
+            overflow-x: hidden;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Radial neon background glows */
+        body::before {
+            content: '';
+            position: absolute;
+            top: -20%;
+            left: -10%;
+            width: 50%;
+            height: 50%;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(6, 182, 212, 0.06) 0%, transparent 70%);
+            z-index: 0;
+            pointer-events: none;
+        }
+
+        body::after {
+            content: '';
+            position: absolute;
+            bottom: -10%;
+            right: -10%;
+            width: 60%;
+            height: 60%;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(217, 70, 239, 0.05) 0%, transparent 70%);
+            z-index: 0;
+            pointer-events: none;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 32px;
+            background: rgba(8, 10, 16, 0.85);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--border-color);
+            z-index: 100;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .logo-indicator {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background-color: var(--color-magenta);
+            box-shadow: var(--glow-magenta);
+        }
+
+        h1 {
+            font-size: 20px;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+            background: linear-gradient(135deg, #ffffff 0%, #cbd5e1 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .btn-back {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            color: var(--text-main);
+            text-decoration: none;
+            font-size: 13px;
+            font-weight: 600;
+            transition: all 0.2s ease;
+        }
+
+        .btn-back:hover {
+            background: rgba(255, 255, 255, 0.07);
+            border-color: rgba(255, 255, 255, 0.15);
+        }
+
+        .main-container {
+            display: grid;
+            grid-template-columns: 1.5fr 1fr;
+            gap: 24px;
+            padding: 24px 32px;
+            flex: 1;
+            z-index: 10;
+            max-width: 1600px;
+            margin: 0 auto;
+            width: 100%;
+        }
+
+        .left-column {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .right-column {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            height: calc(100vh - 120px);
+            position: sticky;
+            top: 100px;
+        }
+
+        .card {
+            background: var(--panel-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 20px;
+            backdrop-filter: blur(16px);
+        }
+
+        .card-title {
+            font-size: 16px;
+            font-weight: 700;
+            margin-bottom: 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid rgba(255,255,255,0.03);
+            padding-bottom: 8px;
+        }
+
+        /* Flowchart Layout */
+        .flowchart-container {
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+            position: relative;
+            padding: 10px 0;
+        }
+
+        .gate-card {
+            display: grid;
+            grid-template-columns: 60px 1fr;
+            gap: 16px;
+            background: rgba(255, 255, 255, 0.015);
+            border: 1px solid rgba(255, 255, 255, 0.03);
+            border-radius: 10px;
+            padding: 16px;
+            position: relative;
+            transition: all 0.3s ease;
+        }
+
+        .gate-card.active {
+            background: rgba(6, 182, 212, 0.05);
+            border-color: var(--color-cyan);
+            box-shadow: 0 0 20px rgba(6, 182, 212, 0.15);
+        }
+
+        .gate-card.blocked {
+            background: rgba(244, 63, 94, 0.06);
+            border-color: var(--color-rose);
+            box-shadow: 0 0 20px rgba(244, 63, 94, 0.15);
+        }
+
+        .gate-badge {
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 15px;
+            color: var(--text-muted);
+            transition: all 0.3s ease;
+        }
+
+        .gate-card.active .gate-badge {
+            background: var(--color-cyan);
+            border-color: var(--color-cyan);
+            color: #080a10;
+            box-shadow: var(--glow-cyan);
+        }
+
+        .gate-card.blocked .gate-badge {
+            background: var(--color-rose);
+            border-color: var(--color-rose);
+            color: #080a10;
+            box-shadow: var(--glow-rose);
+        }
+
+        .gate-body {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .gate-title {
+            font-weight: 600;
+            font-size: 14px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .gate-desc {
+            font-size: 12px;
+            color: var(--text-muted);
+            line-height: 1.4;
+        }
+
+        .gate-metrics {
+            display: flex;
+            gap: 12px;
+            font-size: 11px;
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--color-cyan);
+            margin-top: 6px;
+            background: rgba(0,0,0,0.2);
+            padding: 4px 8px;
+            border-radius: 4px;
+            width: fit-content;
+        }
+
+        .gate-card.blocked .gate-metrics {
+            color: var(--color-rose);
+        }
+
+        /* Flow connection arrow */
+        .flow-arrow {
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 14px;
+            height: 12px;
+            margin: -12px 0;
+            z-index: 2;
+        }
+
+        .flow-arrow.active {
+            color: var(--color-cyan);
+            text-shadow: var(--glow-cyan);
+        }
+
+        /* Scenario Selectors */
+        .scenario-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .scenario-btn {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 12px;
+            text-align: left;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .scenario-btn:hover {
+            background: rgba(255, 255, 255, 0.05);
+            border-color: rgba(255, 255, 255, 0.12);
+        }
+
+        .scenario-btn.active {
+            background: rgba(217, 70, 239, 0.05);
+            border-color: var(--color-magenta);
+            box-shadow: 0 0 12px rgba(217, 70, 239, 0.15);
+        }
+
+        .scenario-name {
+            font-size: 13px;
+            font-weight: 600;
+            color: #cbd5e1;
+        }
+
+        .scenario-btn.active .scenario-name {
+            color: var(--color-magenta);
+        }
+
+        .scenario-desc {
+            font-size: 11px;
+            color: var(--text-muted);
+            line-height: 1.3;
+        }
+
+        /* Controls Panel */
+        .controls-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 10px;
+        }
+
+        .control-btns {
+            display: flex;
+            gap: 10px;
+        }
+
+        .btn-ctrl {
+            background: linear-gradient(135deg, var(--color-cyan) 0%, #0891b2 100%);
+            border: none;
+            color: #080a10;
+            font-weight: 600;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 13px;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s ease;
+        }
+
+        .btn-ctrl:hover {
+            box-shadow: var(--glow-cyan);
+            transform: translateY(-1px);
+        }
+
+        .btn-ctrl:disabled {
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text-muted);
+            cursor: not-allowed;
+            box-shadow: none;
+            transform: none;
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--border-color);
+            color: var(--text-main);
+        }
+
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.06);
+            border-color: rgba(255, 255, 255, 0.15);
+            box-shadow: none;
+        }
+
+        /* Console styling */
+        .console-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            min-height: 300px;
+        }
+
+        .console-body {
+            flex: 1;
+            background: #06080d;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 12px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            color: #a7f3d0;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            line-height: 1.4;
+        }
+
+        .toast-notification {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            background: rgba(15, 23, 42, 0.9);
+            border: 1px solid var(--color-cyan);
+            box-shadow: var(--glow-cyan);
+            color: var(--text-main);
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            display: none;
+            z-index: 100000;
+            backdrop-filter: blur(12px);
+            animation: slideIn 0.3s ease;
+        }
+
+        @keyframes slideIn {
+            from { transform: translateY(100px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+
+        .badge-status {
+            font-size: 10px;
+            font-weight: 700;
+            padding: 2px 6px;
+            border-radius: 4px;
+            text-transform: uppercase;
+        }
+
+        .badge-allow {
+            background: rgba(16, 185, 129, 0.15);
+            color: #10b981;
+            border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+
+        .badge-block {
+            background: rgba(244, 63, 94, 0.15);
+            color: #f43f5e;
+            border: 1px solid rgba(244, 63, 94, 0.3);
+        }
+
+        .badge-wait {
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text-muted);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="header-left">
+            <div class="logo-indicator"></div>
+            <h1>Active Inference Gateway - Visual Flow Walkthrough</h1>
+        </div>
+        <a href="/" id="back-link" class="btn-back">
+            <span>&larr; Back to Dashboard</span>
+        </a>
+    </header>
+
+    <div class="main-container">
+        <!-- LEFT COLUMN: Flow Chart Steps -->
+        <div class="left-column">
+            <!-- Scenario Selector -->
+            <div class="card">
+                <div class="card-title">Select Trace Scenario</div>
+                <div class="scenario-grid">
+                    <button class="scenario-btn active" onclick="selectScenario('clean')">
+                        <span class="scenario-name">Clean Chat Request</span>
+                        <span class="scenario-desc">Standard user query. Evaluated as safe, passes all gates.</span>
+                    </button>
+                    <button class="scenario-btn" onclick="selectScenario('opa_block')">
+                        <span class="scenario-name">Policy Violation</span>
+                        <span class="scenario-desc">Request containing blocked terms. Terminated at Layer 1.</span>
+                    </button>
+                    <button class="scenario-btn" onclick="selectScenario('pii_block')">
+                        <span class="scenario-name">PII Leakage</span>
+                        <span class="scenario-desc">Sends sensitive metrics. Spike surprise and escalates L3.</span>
+                    </button>
+                    <button class="scenario-btn" onclick="selectScenario('agent_block')">
+                        <span class="scenario-name">Unregistered Agent</span>
+                        <span class="scenario-desc">Rogue tool request missing registration key. Blocks early.</span>
+                    </button>
+                </div>
+
+                <div class="controls-row">
+                    <div class="control-btns">
+                        <button class="btn-ctrl" id="btn-run" onclick="runScenario()">Run Trace Scenario</button>
+                        <button class="btn-ctrl btn-secondary" id="btn-prev" onclick="stepPrevious()" disabled>Previous Gate</button>
+                        <button class="btn-ctrl btn-secondary" id="btn-next" onclick="stepNext()" disabled>Next Gate</button>
+                    </div>
+                    <div style="font-size: 13px; color: var(--text-muted);" id="step-counter">Select a scenario to start the trace</div>
+                </div>
+            </div>
+
+            <!-- Visual Flowchart Gates -->
+            <div class="card" style="flex: 1;">
+                <div class="card-title">Active Inference Decision Path</div>
+                <div class="flowchart-container">
+                    <!-- Gate 1 -->
+                    <div class="gate-card" id="gate-1">
+                        <div class="gate-badge">1</div>
+                        <div class="gate-body">
+                            <div class="gate-title">
+                                <span>Ingress check & Key Verification</span>
+                                <span class="badge-status badge-wait" id="status-gate-1">Waiting</span>
+                            </div>
+                            <div class="gate-desc">Performs duplicate double-click hashing, checks size limits, and validates the X-Agent-Key header.</div>
+                            <div class="gate-metrics" id="metrics-gate-1" style="display: none;"></div>
+                        </div>
+                    </div>
+
+                    <div class="flow-arrow" id="arrow-1">&darr;</div>
+
+                    <!-- Gate 2 -->
+                    <div class="gate-card" id="gate-2">
+                        <div class="gate-badge">2</div>
+                        <div class="gate-body">
+                            <div class="gate-title">
+                                <span>Layer 1: Declarative Policy & Heuristics</span>
+                                <span class="badge-status badge-wait" id="status-gate-2">Waiting</span>
+                            </div>
+                            <div class="gate-desc">Evaluates OPA Rego access roles. Scans inputs using heuristics classifiers (PII, prompt injection, command tags) mapping to sensory observation.</div>
+                            <div class="gate-metrics" id="metrics-gate-2" style="display: none;"></div>
+                        </div>
+                    </div>
+
+                    <div class="flow-arrow" id="arrow-2">&darr;</div>
+
+                    <!-- Gate 3 -->
+                    <div class="gate-card" id="gate-3">
+                        <div class="gate-badge">3</div>
+                        <div class="gate-body">
+                            <div class="gate-title">
+                                <span>Layer 2: Leaky Variational Free Energy (VFE)</span>
+                                <span class="badge-status badge-wait" id="status-gate-3">Waiting</span>
+                            </div>
+                            <div class="gate-desc">Performs Bayesian belief updates based on classifier surprise. Integrates leaky VFE decay to track threat surprise accumulation.</div>
+                            <div class="gate-metrics" id="metrics-gate-3" style="display: none;"></div>
+                        </div>
+                    </div>
+
+                    <div class="flow-arrow" id="arrow-3">&darr;</div>
+
+                    <!-- Gate 4 -->
+                    <div class="gate-card" id="gate-4">
+                        <div class="gate-badge">4</div>
+                        <div class="gate-body">
+                            <div class="gate-title">
+                                <span>Layer 3 & 4: Precision Sidecar & Historical State</span>
+                                <span class="badge-status badge-wait" id="status-gate-4">Waiting</span>
+                            </div>
+                            <div class="gate-desc">Layer 3 sidecar scales the precision temperature parameters based on VFE surprise. Layer 4 logs persistent cross-session entity behaviors.</div>
+                            <div class="gate-metrics" id="metrics-gate-4" style="display: none;"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- RIGHT COLUMN: Console Output -->
+        <div class="right-column">
+            <div class="card console-container">
+                <div class="card-title">Live Trace Analysis</div>
+                <div class="console-body" id="console-output">Select a scenario and click "Run Trace Scenario" to start the live trace.
+
+The trace requests present the 'X-Trace-Flow: true' header to the backend to get the exact active inference mathematics calculated at each gate.</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast-notification" id="toast-notify">Trace loaded successfully!</div>
+
+    <script>
+        // Scenario Payload Definitions
+        const SCENARIOS = {
+            clean: {
+                url: "/v1/chat/completions",
+                headers: {},
+                body: {
+                    messages: [{ role: "user", content: "Hello, how can I learn Go programming?" }]
+                }
+            },
+            opa_block: {
+                url: "/v1/agent/action",
+                headers: {
+                    "X-Agent-Key": "agent-retro-sysop",
+                    "X-User-Role": "anonymous"
+                },
+                body: {
+                    tool: "execute_bash_command",
+                    args: { command: "rm -rf /" }
+                }
+            },
+            pii_block: {
+                url: "/v1/chat/completions",
+                headers: {
+                    "X-Theta-Override": "2.0"
+                },
+                body: {
+                    messages: [
+                        { role: "user", content: "My social security number is 999-12-3456" }
+                    ]
+                }
+            },
+            agent_block: {
+                url: "/v1/agent/action",
+                headers: {
+                    "X-Agent-Key": "rogue-agent-revoked-xyz"
+                },
+                body: {
+                    tool: "read_file",
+                    args: { path: "/app/config/gateway_config.json" }
+                }
+            }
+        };
+
+        let currentScenario = "clean";
+        let activeTrace = null;
+        let currentStep = 0;
+
+        window.onload = function() {
+            document.getElementById("back-link").href = window.location.protocol + "//" + window.location.hostname + ":1173/";
+        };
+
+        function selectScenario(id) {
+            document.querySelectorAll(".scenario-btn").forEach(btn => btn.classList.remove("active"));
+            event.currentTarget.classList.add("active");
+            currentScenario = id;
+            resetFlowchart();
+        }
+
+        function resetFlowchart() {
+            activeTrace = null;
+            currentStep = 0;
+            document.getElementById("step-counter").innerText = "Select a scenario to start the trace";
+            document.getElementById("btn-prev").disabled = true;
+            document.getElementById("btn-next").disabled = true;
+            document.getElementById("console-output").innerText = "Ready to run scenario...";
+
+            for (let i = 1; i <= 4; i++) {
+                const card = document.getElementById(`gate-${i}`);
+                card.className = "gate-card";
+                const badge = document.getElementById(`status-gate-${i}`);
+                badge.className = "badge-status badge-wait";
+                badge.innerText = "Waiting";
+                const metrics = document.getElementById(`metrics-gate-${i}`);
+                metrics.style.display = "none";
+                
+                if (i < 4) {
+                    document.getElementById(`arrow-${i}`).className = "flow-arrow";
+                }
+            }
+        }
+
+        function showToastNotification(message) {
+            const toast = document.getElementById("toast-notify");
+            toast.innerText = message;
+            toast.style.display = "block";
+            setTimeout(() => {
+                toast.style.display = "none";
+            }, 3000);
+        }
+
+        async function runScenario() {
+            resetFlowchart();
+            const config = SCENARIOS[currentScenario];
+            const gatewayBase = window.location.protocol + "//" + window.location.hostname + ":1173";
+            const consoleOutput = document.getElementById("console-output");
+            consoleOutput.innerText = `Dispatching tracing request to Gateway API:\nPOST ${gatewayBase}${config.url}...\n\n`;
+
+            try {
+                const headers = {
+                    "Content-Type": "application/json",
+                    "X-Trace-Flow": "true",
+                    ...config.headers
+                };
+
+                const r = await fetch(gatewayBase + config.url, {
+                    method: "POST",
+                    headers: headers,
+                    body: JSON.stringify(config.body)
+                });
+
+                const data = await r.json();
+                if (!data._trace) {
+                    consoleOutput.innerText += `Error: Gateway did not return active inference trace information.\nResponse status: ${r.status}\n`;
+                    return;
+                }
+
+                activeTrace = data._trace;
+                showToastNotification("Live Active Inference Trace Loaded!");
+                
+                // Determine terminal step automatically
+                let terminalStep = 4;
+                if (activeTrace.key_validation.status === "blocked") {
+                    terminalStep = 1;
+                } else if (activeTrace.opa.status === "blocked") {
+                    terminalStep = 2;
+                } else if (activeTrace.verdict.status === 403) {
+                    terminalStep = 4;
+                }
+                
+                currentStep = terminalStep;
+                renderStep();
+            } catch(e) {
+                consoleOutput.innerText += `Connection Failed: ${e.message}\nEnsure gateway container is running.`;
+            }
+        }
+
+        function renderStep() {
+            document.getElementById("step-counter").innerText = `Gate ${currentStep} of 4`;
+            document.getElementById("btn-prev").disabled = (currentStep === 1);
+            document.getElementById("btn-next").disabled = (currentStep === 4);
+
+            const trace = activeTrace;
+            const consoleOutput = document.getElementById("console-output");
+            consoleOutput.innerHTML = "";
+
+            for (let i = 1; i <= 4; i++) {
+                const card = document.getElementById(`gate-${i}`);
+                const badge = document.getElementById(`status-gate-${i}`);
+                const metrics = document.getElementById(`metrics-gate-${i}`);
+                
+                if (i < currentStep) {
+                    card.className = "gate-card";
+                    badge.className = "badge-status badge-allow";
+                    badge.innerText = "Passed";
+                    metrics.style.display = "block";
+                    populateMetrics(i);
+                    if (i < 4) document.getElementById(`arrow-${i}`).className = "flow-arrow active";
+                } else if (i === currentStep) {
+                    const stepStatus = isGateBlocked(i) ? "blocked" : "active";
+                    card.className = `gate-card ${stepStatus}`;
+                    badge.className = isGateBlocked(i) ? "badge-status badge-block" : "badge-status badge-allow";
+                    badge.innerText = isGateBlocked(i) ? "Blocked" : "Processing";
+                    metrics.style.display = "block";
+                    populateMetrics(i);
+                    if (i < 4) document.getElementById(`arrow-${i}`).className = "flow-arrow active";
+                } else {
+                    card.className = "gate-card";
+                    badge.className = "badge-status badge-wait";
+                    badge.innerText = "Waiting";
+                    metrics.style.display = "none";
+                    if (i < 4) document.getElementById(`arrow-${i}`).className = "flow-arrow";
+                }
+            }
+
+            printConsoleLogs();
+        }
+
+        function isGateBlocked(step) {
+            if (!activeTrace) return false;
+            if (step === 1 && activeTrace.key_validation.status === "blocked") return true;
+            if (step === 2 && activeTrace.opa.status === "blocked") return true;
+            if (step === 3 && activeTrace.layer2.status === "blocked") return true;
+            if (step === 4 && activeTrace.verdict.status === 403) {
+                if (activeTrace.key_validation.status !== "blocked" && activeTrace.opa.status !== "blocked") {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        function populateMetrics(step) {
+            const metricsEl = document.getElementById(`metrics-gate-${step}`);
+            const trace = activeTrace;
+            if (!trace) return;
+
+            if (step === 1) {
+                const key = trace.key_validation.key || "none";
+                const isAgent = trace.key_validation.is_agent ? "Yes" : "No";
+                const dupStatus = trace.deduplication.status;
+                metricsEl.innerHTML = `Key: ${key} | Agent: ${isAgent} | DupCheck: ${dupStatus}`;
+            } else if (step === 2) {
+                const role = trace.opa.role;
+                const opaStatus = trace.opa.status;
+                const obs = trace.layer1.observation;
+                metricsEl.innerHTML = `OPA Role: ${role} (${opaStatus}) | Obs: ${obs}`;
+            } else if (step === 3) {
+                const vfe = parseFloat(trace.layer2.vfe).toFixed(4);
+                const surprise = parseFloat(trace.layer2.surprise).toFixed(4);
+                const beliefs = trace.layer2.beliefs.map(b => parseFloat(b).toFixed(2)).join(", ");
+                metricsEl.innerHTML = `VFE: ${vfe} | Leaky Surprise: ${surprise} | Beliefs [S,U,M]: [${beliefs}]`;
+            } else if (step === 4) {
+                const sidecar = trace.layer3.sidecar_action;
+                const l3Vfe = parseFloat(trace.layer3.l3_vfe).toFixed(4);
+                const gamma = parseFloat(trace.layer3.precision_gamma).toFixed(2);
+                const l4Surp = parseFloat(trace.layer4.accumulated_surprise).toFixed(4);
+                metricsEl.innerHTML = `L3 VFE: ${l3Vfe} | Gamma &gamma;: ${gamma} | L4 Surprise: ${l4Surp} | Sidecar: ${sidecar}`;
+            }
+        }
+
+        function printConsoleLogs() {
+            const consoleOutput = document.getElementById("console-output");
+            const trace = activeTrace;
+            if (!trace) return;
+
+            let logText = ``;
+
+            if (currentStep >= 1) {
+                logText += `<span style="color:var(--color-cyan)">=== GATE 1: INGRESS FILTER & KEY VALIDATION ===</span>\n`;
+                logText += `Deduplication Check: ${trace.deduplication.status === "passed" ? "OK" : "BLOCKED"} (${trace.deduplication.details})\n`;
+                logText += `Agent Header key_id: "${trace.key_validation.key}"\n`;
+                logText += `Is Agent Action Route: ${trace.key_validation.is_agent}\n`;
+                logText += `Key Validation Result: <span style="color:${trace.key_validation.status === "blocked" ? "var(--color-rose)" : "var(--color-emerald)"}">${trace.key_validation.status.toUpperCase()}</span>\n`;
+                if (trace.key_validation.status === "blocked") {
+                    logText += `Block Reason: ${trace.key_validation.reason}\n\n`;
+                    logText += `<span style="color:var(--color-rose)">[TERMINATED] Request blocked at Gate 1. Early exit.</span>\n`;
+                    consoleOutput.innerHTML = logText;
+                    return;
+                }
+                logText += `\n`;
+            }
+
+            if (currentStep >= 2) {
+                logText += `<span style="color:var(--color-cyan)">=== GATE 2: POLICY ENGINE & CLASS-1 CLASSIFIERS ===</span>\n`;
+                logText += `User Role Header: "${trace.opa.role}"\n`;
+                logText += `OPA/Rego Policy Decision: <span style="color:${trace.opa.status === "blocked" ? "var(--color-rose)" : "var(--color-emerald)"}">${trace.opa.status.toUpperCase()}</span>\n`;
+                if (trace.opa.status === "blocked") {
+                    logText += `Block Reason: ${trace.opa.reason}\n\n`;
+                    logText += `<span style="color:var(--color-rose)">[TERMINATED] Request blocked at Gate 2. OPA override.</span>\n`;
+                    consoleOutput.innerHTML = logText;
+                    return;
+                }
+                logText += `Heuristics classifier observation code: ${trace.layer1.observation} (id: ${trace.layer1.obs_id})\n`;
+                logText += `Syntactic observations analyzed from tokens.\n\n`;
+            }
+
+            if (currentStep >= 3) {
+                logText += `<span style="color:var(--color-cyan)">=== GATE 3: LAYER 2 BAYESIAN BELIEF ENGINE ===</span>\n`;
+                logText += `Observed Variational Free Energy surprise (VFE): ${trace.layer2.vfe.toFixed(6)}\n`;
+                logText += `Decayed accumulated Leaky VFE surprise: ${trace.layer2.surprise.toFixed(6)}\n`;
+                logText += `Updated State Beliefs [Safe, Suspicious, Malicious]:\n`;
+                logText += `  - Safe: ${(trace.layer2.beliefs[0] * 100).toFixed(2)}%\n`;
+                logText += `  - Suspicious: ${(trace.layer2.beliefs[1] * 100).toFixed(2)}%\n`;
+                logText += `  - Malicious: ${(trace.layer2.beliefs[2] * 100).toFixed(2)}%\n\n`;
+            }
+
+            if (currentStep >= 4) {
+                logText += `<span style="color:var(--color-cyan)">=== GATE 4: LAYER 3 & 4 GOVERNANCE ===</span>\n`;
+                logText += `Sidecar Precision Gamma &gamma;2: ${trace.layer3.precision_gamma.toFixed(2)}\n`;
+                logText += `Escalation status: ${trace.layer3.sidecar_action}\n`;
+                logText += `Layer 4 Client IP: "${trace.layer4.entity_key}"\n`;
+                logText += `Layer 4 Accumulated IP Surprise: ${trace.layer4.accumulated_surprise.toFixed(6)}\n`;
+                logText += `Layer 4 Request count: ${trace.layer4.total_requests} | Blocks count: ${trace.layer4.total_blocks}\n\n`;
+
+                logText += `<span style="color:var(--color-cyan)">=== FINAL VERDICT ===</span>\n`;
+                const code = trace.verdict.status;
+                const color = code === 403 ? "var(--color-rose)" : "var(--color-emerald)";
+                logText += `Status Code: <span style="color:${color}">${code} ${code === 403 ? "Forbidden" : "OK"}</span>\n`;
+                if (code === 403) {
+                    logText += `Reason: ${trace.verdict.blocked_reason}\n`;
+                } else {
+                    logText += `Details: ${trace.verdict.details}\n`;
+                }
+            }
+
+            consoleOutput.innerHTML = logText;
+        }
+
+        function stepNext() {
+            if (currentStep < 4) {
+                currentStep++;
+                renderStep();
+            }
+        }
+
+        function stepPrevious() {
+            if (currentStep > 1) {
+                currentStep--;
+                renderStep();
+            }
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,130 @@
+version: "3.9"
+
+services:
+  # =========================================================================
+  # 1. Centralized PostgreSQL Database (Running entirely in tmpfs RAM)
+  # =========================================================================
+  aiaiai_postgres:
+    image: postgres:15
+    container_name: aiaiai_postgres_db
+    command: postgres -c synchronous_commit=off -c fsync=off -c full_page_writes=off -c max_connections=150
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: postgres
+    volumes:
+      # Mount PostgreSQL PGDATA into RAM to bypass WAL storage bottlenecks
+      - type: tmpfs
+        target: /var/lib/postgresql/data
+        tmpfs:
+          size: 256M
+      # Mounting schema definitions and initialization scripts
+      - ./database/init-db.sh:/docker-entrypoint-initdb.d/init-db.sh:ro
+      - ./database/schema.sql:/tmp/schema.sql:ro
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "user", "-d", "postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1GB
+
+  # =========================================================================
+  # 2. Go Gateway Proxy (Layer 1 Active Inference & Translation Facade)
+  # =========================================================================
+  aiaiai_gateway:
+    build:
+      context: ./gateway
+    container_name: aiaiai_gateway_proxy
+    environment:
+      DATABASE_URL: postgresql://user:password@aiaiai_postgres:5432/postgres?sslmode=disable
+      REDIS_URL: aiaiai_redis:6379
+      DEFAULT_MATRICES_PATH: /app/config/default_matrices.json
+      GATEWAY_CONFIG_PATH: /app/config/gateway_config.json
+      PORT: 1163
+      GOMAXPROCS: 2
+    volumes:
+      - ./config:/app/config
+      - ./gateway/policies:/app/policies
+      - ./gateway/dashboard:/app/dashboard
+    ports:
+      - "1173:1173"
+      - "1163:1163"
+    depends_on:
+      aiaiai_postgres:
+        condition: service_healthy
+      aiaiai_redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1GB
+        reservations:
+          cpus: '1.0'
+          memory: 512MB
+
+  # =========================================================================
+  # 3. Python Sidecar (Layer 2 Active Inference & Top-Down Coordination)
+  # =========================================================================
+  aiaiai_sidecar:
+    build:
+      context: ./sidecar
+    container_name: aiaiai_python_sidecar
+    environment:
+      DATABASE_URL: postgresql://user:password@aiaiai_postgres:5432/postgres?sslmode=disable
+      GATEWAY_URL: http://aiaiai_gateway:1163
+      OMP_NUM_THREADS: 1
+      MKL_NUM_THREADS: 1
+      OPENBLAS_NUM_THREADS: 1
+    volumes:
+      - ./config:/app/config
+    ports:
+      - "5001:5001"
+    depends_on:
+      aiaiai_postgres:
+        condition: service_healthy
+      aiaiai_gateway:
+        condition: service_started
+    deploy:
+      resources:
+        limits:
+          cpus: '2.5'
+          memory: 3GB
+        reservations:
+          cpus: '1.0'
+          memory: 1GB
+
+  # =========================================================================
+  # 4. Mock Upstream LLM Server (Simulates OpenAI, Gemini, and Claude)
+  # =========================================================================
+  aiaiai_mock_llm:
+    build:
+      context: ./mock_llm
+    container_name: aiaiai_mock_llm
+    ports:
+      - "8082:8081"
+
+  # =========================================================================
+  # 5. Redis Cache (In-Memory Agent Belief State Storage)
+  # =========================================================================
+  aiaiai_redis:
+    image: redis:7-alpine
+    container_name: aiaiai_redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512MB
