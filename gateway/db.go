@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -27,6 +28,8 @@ var (
 	localDeltaBlocks    uint64
 	localTotalLatencyUs uint64
 	localLatencyCount   uint64
+
+	sessionNameCache    sync.Map // uuid_string -> original_session_id
 )
 
 type dbTask func()
@@ -224,7 +227,44 @@ func resolveSessionUUID(sessionID string) (uuid.UUID, error) {
 	if err == nil {
 		return u, nil
 	}
-	return uuid.NewSHA1(uuid.NameSpaceDNS, []byte(sessionID)), nil
+	res := uuid.NewSHA1(uuid.NameSpaceDNS, []byte(sessionID))
+	sessionNameCache.Store(res.String(), sessionID)
+	return res, nil
+}
+
+func initSessionNameCache() {
+	agentKeys := []string{
+		"agent-retro-sysop",
+		"agent-chaos-monkey",
+		"agent-ghost-coder",
+		"agent-network-sentinel",
+		"agent-disk-sanitizer",
+		"agent-memory-checker",
+		"agent-dependency-auditor",
+		"agent-log-rotator",
+		"agent-telemetry-mesh",
+		"agent-labs-dj",
+		"agent-truth-engine",
+		"agent-doc-summarizer",
+		"agent-exfil-crawler",
+		"agent-credential-harvester",
+		"agent-fuzz-tester",
+		"agent-system-tester",
+	}
+	for _, key := range agentKeys {
+		fleetSessID := fmt.Sprintf("fleet-loop-%s", key)
+		u := uuid.NewSHA1(uuid.NameSpaceDNS, []byte(fleetSessID))
+		sessionNameCache.Store(u.String(), fleetSessID)
+
+		uKey := uuid.NewSHA1(uuid.NameSpaceDNS, []byte(key))
+		sessionNameCache.Store(uKey.String(), key)
+	}
+
+	for i := 1; i <= 1000; i++ {
+		sessID := fmt.Sprintf("sim-worker-%d", i)
+		u := uuid.NewSHA1(uuid.NameSpaceDNS, []byte(sessID))
+		sessionNameCache.Store(u.String(), sessID)
+	}
 }
 
 // GetSessionMatrices loads active profile matrices from database, or seeds and returns defaults if missing
@@ -577,8 +617,14 @@ func IsSessionQuarantined(sessionID string) (bool, error) {
 	if DB == nil {
 		return false, nil
 	}
+	sessUUID, err := resolveSessionUUID(sessionID)
+	if err != nil {
+		return false, err
+	}
+	uuidStr := sessUUID.String()
+
 	var status string
-	err := DB.QueryRow("SELECT status FROM session_quarantine WHERE session_id = $1", sessionID).Scan(&status)
+	err = DB.QueryRow("SELECT status FROM session_quarantine WHERE session_id = $1", uuidStr).Scan(&status)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return false, nil
@@ -592,11 +638,17 @@ func QuarantineSession(sessionID string, reason string) error {
 	if DB == nil {
 		return nil
 	}
-	_, err := DB.Exec(`
+	sessUUID, err := resolveSessionUUID(sessionID)
+	if err != nil {
+		return err
+	}
+	uuidStr := sessUUID.String()
+
+	_, err = DB.Exec(`
 		INSERT INTO session_quarantine (session_id, status, reason, quarantined_at, decided_at)
 		VALUES ($1, 'QUARANTINED', $2, NOW(), NULL)
 		ON CONFLICT (session_id) DO UPDATE SET status = 'QUARANTINED', reason = $2, quarantined_at = NOW(), decided_at = NULL
-	`, sessionID, reason)
+	`, uuidStr, reason)
 	return err
 }
 
@@ -604,13 +656,19 @@ func ResolveQuarantine(sessionID string, approved bool) error {
 	if DB == nil {
 		return nil
 	}
+	sessUUID, err := resolveSessionUUID(sessionID)
+	if err != nil {
+		return err
+	}
+	uuidStr := sessUUID.String()
+
 	status := "REJECTED"
 	if approved {
 		status = "APPROVED"
 	}
-	_, err := DB.Exec(`
+	_, err = DB.Exec(`
 		UPDATE session_quarantine SET status = $1, decided_at = NOW() WHERE session_id = $2
-	`, status, sessionID)
+	`, status, uuidStr)
 	return err
 }
 

@@ -102,6 +102,7 @@ func initSimUUIDs() {
 
 func main() {
 	initSimUUIDs()
+	initSessionNameCache()
 	log.Println("Starting Project AIAIAI Go Gateway...")
 
 	// Initialize shared connection pooled HTTP client
@@ -1322,6 +1323,9 @@ func handleAPILogs(w http.ResponseWriter, r *http.Request) {
 					if !includeSim && simUUIDs[entry.SessionID] {
 						continue
 					}
+					if val, ok := sessionNameCache.Load(entry.SessionID); ok {
+						entry.SessionID = val.(string)
+					}
 					logs = append(logs, entry)
 				}
 			}
@@ -1371,9 +1375,14 @@ func handleAPILogs(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
+		displaySessID := sessID
+		if val, ok := sessionNameCache.Load(sessID); ok {
+			displaySessID = val.(string)
+		}
+
 		logs = append(logs, LogEntry{
 			TransactionID:     txID,
-			SessionID:         sessID,
+			SessionID:         displaySessID,
 			ObservationVector: obs,
 			VFEScore:          vfe,
 			VFEScoreL1:        vfeL1,
@@ -2255,12 +2264,28 @@ func validateAgentKey(w http.ResponseWriter, r *http.Request, body []byte, isAct
 		log.Printf("[Agent Blocked] IP: %s, Key: %s, Reason: %s", clientIP, claimedKey, reason)
 	}
 
+	sessID := r.Header.Get("X-Session-ID")
+	if sessID == "" {
+		sessID = "unauthenticated"
+	}
+
 	// Structured JSON security audit log
-	logSecurityAuditEvent("", r.Header.Get("X-Session-ID"), claimedKey, "UNAUTHENTICATED", "KEY_VALIDATION_FAILED", 0.0, "BLOCK", false)
+	logSecurityAuditEvent("", sessID, claimedKey, "UNAUTHENTICATED", "KEY_VALIDATION_FAILED", 0.0, "BLOCK", false)
 
 	if DB != nil {
 		LogForensicEventAsync(uuid.New().String(), clientIP, claimedKey, userAgent, attemptedPayload, reason)
 	}
+
+	txID := uuid.New().String()
+	obs := OBS_INPUT_ERROR
+	LogTransactionStateAsync(txID, sessID, obs, 5.0, 5.0, 5.0, true)
+
+	respJSON, _ := json.Marshal(map[string]interface{}{
+		"error":          "Security Block: Agent Verification Failed",
+		"blocked_reason": reason,
+	})
+
+	recordPayloadDetail(sessID, txID, body, body, nil, respJSON)
 
 	if trace != nil {
 		(*trace)["key_validation"] = map[string]interface{}{
@@ -2274,11 +2299,6 @@ func validateAgentKey(w http.ResponseWriter, r *http.Request, body []byte, isAct
 			"blocked_reason": reason,
 		}
 	}
-
-	respJSON, _ := json.Marshal(map[string]interface{}{
-		"error":          "Security Block: Agent Verification Failed",
-		"blocked_reason": reason,
-	})
 
 	injectTraceAndWrite(w, trace, respJSON, http.StatusForbidden)
 	return false
@@ -2711,6 +2731,12 @@ func handleAPIQuarantineList(w http.ResponseWriter, r *http.Request) {
 					if decidedVal.Valid {
 						item.DecidedAt = &decidedVal.Time
 					}
+					
+					origSessionID := item.SessionID
+					if val, ok := sessionNameCache.Load(item.SessionID); ok {
+						origSessionID = val.(string)
+					}
+
 					val, ok := sessionCache.Load(item.SessionID)
 					if ok {
 						state := val.(*ActiveInfState)
@@ -2718,6 +2744,8 @@ func handleAPIQuarantineList(w http.ResponseWriter, r *http.Request) {
 							item.LastPayload = state.HistoryPayloads[len(state.HistoryPayloads)-1]
 						}
 					}
+					
+					item.SessionID = origSessionID
 					items = append(items, item)
 				}
 			}
@@ -2746,15 +2774,22 @@ func handleAPIQuarantineAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	sessUUID, err := resolveSessionUUID(req.SessionID)
+	if err != nil {
+		http.Error(w, "Invalid session ID format", http.StatusBadRequest)
+		return
+	}
+	uuidStr := sessUUID.String()
+
 	approved := req.Action == "APPROVE"
-	if err := ResolveQuarantine(req.SessionID, approved); err != nil {
+	if err := ResolveQuarantine(uuidStr, approved); err != nil {
 		log.Printf("[Error] Failed to resolve quarantine: %v", err)
 		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
 	}
 
 	if approved {
-		val, ok := sessionCache.Load(req.SessionID)
+		val, ok := sessionCache.Load(uuidStr)
 		if ok {
 			state := val.(*ActiveInfState)
 			state.Lock()
@@ -2766,7 +2801,7 @@ func handleAPIQuarantineAction(w http.ResponseWriter, r *http.Request) {
 				lastPayload = &state.HistoryPayloads[len(state.HistoryPayloads)-1]
 			}
 			state.Unlock()
-			StoreSessionState(req.SessionID, state)
+			StoreSessionState(uuidStr, state)
 
 			if lastPayload != nil && lastPayload.RawRequest != "" {
 				go func(sessID string, payload PayloadDetail) {

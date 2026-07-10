@@ -1158,7 +1158,13 @@
                 sessions.forEach(sid => {
                     const option = document.createElement("option");
                     option.value = sid;
-                    option.innerText = sid.substring(0, 8) + "...";
+                    let displayText = sid;
+                    if (sid.startsWith("fleet-loop-")) {
+                        displayText = sid.replace("fleet-loop-", "") + " Agent";
+                    } else if (sid.length > 20) {
+                        displayText = sid.substring(0, 8) + "...";
+                    }
+                    option.innerText = displayText;
                     if(sid === currentSelection) {
                         option.selected = true;
                     }
