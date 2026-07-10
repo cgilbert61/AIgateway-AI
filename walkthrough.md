@@ -165,3 +165,25 @@ To optimize host resource consumption on the developer workstation, we successfu
 3. **Successful Docker Compose Verification:**
    - Ran `python test_gateway.py` against the Docker Compose stack; all 8 integration tests executed successfully and passed in under 15 seconds.
 
+## ⚠️ G1163RT Enterprise Upgrade - Quarantine & SIEM Integrations
+
+We have successfully implemented and verified the G1163RT enterprise security upgrades on the `enterprise-upgrade` branch:
+
+1. **Database Schema Enhancements**:
+   - Added the `session_quarantine` table in [schema.sql](file:///c:/Users/chuck/AIAIAI/database/schema.sql) and [db.go](file:///c:/Users/chuck/AIAIAI/gateway/db.go) to track quarantined sessions.
+   - Added the `siem_config` table to save Splunk/Datadog connection details.
+
+2. **Session-Level Quarantine & Micro-Containment**:
+   - Integrated check filters in `handleChatCompletions` and `handleAgentAction` inside [main.go](file:///c:/Users/chuck/AIAIAI/gateway/main.go). If a session is quarantined, any subsequent requests fail-closed instantly with a `403 Forbidden` JSON block message: `"Blocked: Session has been quarantined pending security analyst review."`
+   - Configured the gateway to automatically quarantine a session whenever it triggers an active inference security block.
+
+3. **Analytics Dashboard Quarantine Workspace**:
+   - Built a dedicated **Quarantine Workspace** tab panel in the dashboard UI [index.html](file:///c:/Users/chuck/AIAIAI/gateway/dashboard/index.html) displaying pending quarantined sessions, their trigger reasons, quarantined timestamps, and a side-by-side violating payload content diff viewer.
+   - Added interactive **Approve & Release** and **Permanently Block** controls for security operations center (SOC) analysts.
+   - Added an **Integrations** tab in the configuration portal [config.html](file:///c:/Users/chuck/AIAIAI/gateway/dashboard/config.html) to dynamically configure Splunk or Datadog credentials.
+
+4. **Quarantine Integration Tests**:
+   - Added a 9th test case `test_quarantine_block_and_release` in [test_gateway.py](file:///c:/Users/chuck/AIAIAI/test_gateway.py).
+   - Validated that a blocked session is auto-quarantined, blocks subsequent safe requests, is visible in the quarantine queue API, and successfully resumes normal allowed traffic upon analyst approval.
+
+
