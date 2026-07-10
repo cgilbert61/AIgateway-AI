@@ -778,9 +778,14 @@ func handleAgentAction(w http.ResponseWriter, r *http.Request) {
 		txID := uuid.New().String()
 		LogTransactionStateAsync(txID, sessionID, obs, 4.2, vfe, 0.0, true)
 		
+		blockedReason := fmt.Sprintf("Blocked by Open Policy Agent (OPA): %s", reason)
+		if err := QuarantineSession(sessionID, blockedReason); err != nil {
+			log.Printf("[Error] Failed to quarantine session: %v", err)
+		}
+
 		respJSON, _ := json.Marshal(map[string]interface{}{
 			"error":          "Security Block: OPA Policy Violation",
-			"blocked_reason": fmt.Sprintf("Blocked by Open Policy Agent (OPA): %s", reason),
+			"blocked_reason": blockedReason,
 		})
 		
 		recordPayloadDetail(sessionID, txID, body, body, nil, respJSON)
