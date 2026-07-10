@@ -16,8 +16,9 @@ import (
 )
 
 var (
-	minioClient *minio.Client
-	minioBucket string
+	minioClient    *minio.Client
+	minioBucket    string
+	minioTaskQueue = make(chan AuditLogPayload, 100000)
 )
 
 func initMinIO() {
@@ -32,10 +33,18 @@ func initMinIO() {
 	}
 
 	var err error
+	// Set up high-performance connection pool transport
+	transport := &http.Transport{
+		MaxIdleConns:        2000,
+		MaxIdleConnsPerHost: 2000,
+		IdleConnTimeout:     90 * time.Second,
+	}
+
 	// Set up the client connection
 	minioClient, err = minio.New(endpoint, &minio.Options{
-		Creds:  credentials.NewStaticV4(accessKey, secretKey, ""),
-		Secure: false,
+		Creds:     credentials.NewStaticV4(accessKey, secretKey, ""),
+		Secure:    false,
+		Transport: transport,
 	})
 	if err != nil {
 		log.Printf("[MinIO Error] Failed to initialize MinIO client: %v", err)
@@ -88,6 +97,21 @@ func initMinIO() {
 	} else {
 		log.Printf("[MinIO] Bucket '%s' already exists and is active.", minioBucket)
 	}
+
+	// Start the dedicated high-performance worker pool for MinIO uploads
+	StartMinIOWorkerPool()
+}
+
+func StartMinIOWorkerPool() {
+	// Spawn 35 dedicated compliance archival workers
+	for i := 0; i < 35; i++ {
+		go func() {
+			for payload := range minioTaskQueue {
+				uploadAuditLogSync(payload.TransactionID, payload)
+			}
+		}()
+	}
+	log.Println("[MinIO] Started dedicated WORM archiving worker pool (35 workers).")
 }
 
 type AuditLogPayload struct {
@@ -110,28 +134,33 @@ func UploadAuditLogAsync(txID string, payload AuditLogPayload) {
 		return
 	}
 
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
+	select {
+	case minioTaskQueue <- payload:
+	default:
+		// Queue full under peak traffic: log a warning
+		log.Printf("[MinIO Error] Compliance logging queue is full. Dropping log: %s", txID)
+	}
+}
 
-		data, err := json.Marshal(payload)
-		if err != nil {
-			log.Printf("[MinIO Error] Failed to marshal compliance audit log: %v", err)
-			return
-		}
+func uploadAuditLogSync(txID string, payload AuditLogPayload) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
 
-		objectName := fmt.Sprintf("audit/%s/%s.json", payload.Timestamp.Format("2006-01-02"), txID)
-		reader := bytes.NewReader(data)
+	data, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("[MinIO Error] Failed to marshal compliance audit log: %v", err)
+		return
+	}
 
-		_, err = minioClient.PutObject(ctx, minioBucket, objectName, reader, int64(len(data)), minio.PutObjectOptions{
-			ContentType: "application/json",
-		})
-		if err != nil {
-			log.Printf("[MinIO Error] Failed to upload audit log %s: %v", txID, err)
-		} else {
-			log.Printf("[MinIO] Successfully archived audit log %s to WORM storage.", txID)
-		}
-	}()
+	objectName := fmt.Sprintf("audit/%s/%s.json", payload.Timestamp.Format("2006-01-02"), txID)
+	reader := bytes.NewReader(data)
+
+	_, err = minioClient.PutObject(ctx, minioBucket, objectName, reader, int64(len(data)), minio.PutObjectOptions{
+		ContentType: "application/json",
+	})
+	if err != nil {
+		log.Printf("[MinIO Error] Failed to upload audit log %s: %v", txID, err)
+	}
 }
 
 func LogComplianceAuditAsync(txID, sessionID string, observation int, vfeL1, vfeL2, vfeL3 float64, isBlocked bool, r *http.Request, body []byte) {
