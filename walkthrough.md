@@ -212,6 +212,11 @@ We completed a comprehensive load-testing round to address the simulation backup
 - **Pooled Transport & Connection Reuse**: Configured a custom HTTP Transport for the MinIO client with `MaxIdleConns: 2000` and `MaxIdleConnsPerHost: 2000`, enabling complete connection reuse and preventing TCP socket exhaustion.
 - **Dedicated Archiving Worker Pool**: Routed compliance logging requests into a buffered channel queue (`minioTaskQueue` with size 100k) processed by a dedicated pool of **35 background workers**. This decouples compliance log serialization and upload operations entirely from the request hot path (completing in sub-microsecond time) and eliminates context timeouts.
 
+### 5. Multi-Bucket Auto-Provisioning & Integrated S3 Datalake Browser
+- **Auto-Provisioning Buckets**: On startup, `initMinIO()` in [gateway/minio.go](file:///c:/Users/chuck/AIAIAI/gateway/minio.go) automatically provisions three developer-focused testing buckets: `staging`, `quarantine`, and `demo`.
+- **Integrated S3 API Endpoints**: Created backend handlers in [gateway/main.go](file:///c:/Users/chuck/AIAIAI/gateway/main.go) to listing buckets, objects, fetching raw payload content, and staging files directly from the UI.
+- **Glassmorphic UI Browser**: Added an **Add S3** purple cloud icon button in [gateway/dashboard/index.html](file:///c:/Users/chuck/AIAIAI/gateway/dashboard/index.html) that triggers a modal dialog. SOC analysts and developers can select buckets, browse file metadata, load payload bodies instantly into the request editor, and upload new test scripts to any bucket directly from the dashboard.
+
 ---
 
 
