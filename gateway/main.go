@@ -2865,12 +2865,6 @@ func handleAPIQuarantineAction(w http.ResponseWriter, r *http.Request) {
 	uuidStr := sessUUID.String()
 
 	approved := req.Action == "APPROVE"
-	if err := ResolveQuarantine(uuidStr, approved); err != nil {
-		log.Printf("[Error] Failed to resolve quarantine: %v", err)
-		http.Error(w, "Database error", http.StatusInternalServerError)
-		return
-	}
-
 	if approved {
 		state, err := getSessionState(req.SessionID)
 		if err == nil {
@@ -2885,13 +2879,25 @@ func handleAPIQuarantineAction(w http.ResponseWriter, r *http.Request) {
 			state.Unlock()
 			StoreSessionState(uuidStr, state)
 
+			var rawPayload string
 			if lastPayload != nil && lastPayload.RawRequest != "" {
-				go func(sessID string, payload PayloadDetail) {
-					// Asynchronously redeliver the raw request to the upstream LLM
-					isAgentTool := strings.Contains(payload.RawRequest, `"tool"`) && strings.Contains(payload.RawRequest, `"arguments"`)
+				rawPayload = lastPayload.RawRequest
+			} else {
+				log.Printf("[QUARANTINE_REDELIVER] In-memory history empty. Fetching raw request from compliance datalake for session %s...", req.SessionID)
+				dlPayload, err := getQuarantinedPayload(req.SessionID)
+				if err == nil {
+					rawPayload = dlPayload
+				} else {
+					log.Printf("[Error] Failed to fetch quarantined payload from datalake: %v", err)
+				}
+			}
+
+			if rawPayload != "" {
+				go func(sessID string, rawReqStr string) {
+					isAgentTool := strings.Contains(rawReqStr, `"tool"`) && strings.Contains(rawReqStr, `"arguments"`)
 					log.Printf("[QUARANTINE_REDELIVER] Redelivering raw request for session %s (isAgentTool: %t)...", sessID, isAgentTool)
 					
-					respBytes, statusCode, err := forwardToUpstream([]byte(payload.RawRequest), isAgentTool)
+					respBytes, statusCode, err := forwardToUpstream([]byte(rawReqStr), isAgentTool)
 					if err != nil {
 						log.Printf("[Error] Redelivery to upstream failed for session %s: %v", sessID, err)
 						return
@@ -2899,22 +2905,30 @@ func handleAPIQuarantineAction(w http.ResponseWriter, r *http.Request) {
 					
 					log.Printf("[QUARANTINE_REDELIVER] Upstream returned status %d (bytes: %d)", statusCode, len(respBytes))
 					
-					// Update memory cache with response so it can be retrieved by UI
 					stateLatest, errLatest := getSessionState(sessID)
 					if errLatest == nil {
 						stateLatest.Lock()
-						for idx := len(stateLatest.HistoryPayloads) - 1; idx >= 0; idx-- {
-							if stateLatest.HistoryPayloads[idx].TxID == payload.TxID {
-								stateLatest.HistoryPayloads[idx].RawResponse = string(respBytes)
-								stateLatest.HistoryPayloads[idx].TranslatedResponse = string(respBytes)
-								break
+						if len(stateLatest.HistoryPayloads) == 0 {
+							stateLatest.HistoryPayloads = append(stateLatest.HistoryPayloads, PayloadDetail{
+								TxID:               uuid.New().String(),
+								RawRequest:         rawReqStr,
+								TranslatedRequest:  rawReqStr,
+								RawResponse:        string(respBytes),
+								TranslatedResponse: string(respBytes),
+							})
+						} else {
+							for idx := len(stateLatest.HistoryPayloads) - 1; idx >= 0; idx-- {
+								if stateLatest.HistoryPayloads[idx].RawRequest == rawReqStr || idx == len(stateLatest.HistoryPayloads)-1 {
+									stateLatest.HistoryPayloads[idx].RawResponse = string(respBytes)
+									stateLatest.HistoryPayloads[idx].TranslatedResponse = string(respBytes)
+									break
+								}
 							}
 						}
 						stateLatest.Unlock()
 						StoreSessionState(sessID, stateLatest)
 					}
 					
-					// Insert new transaction entry and security log
 					newTxID := uuid.New().String()
 					_ = LogTransactionState(newTxID, sessID, 0, 0.0, 0.0, 0.0, false)
 					logSecurityAuditEvent(newTxID, sessID, "quarantine_redeliver", "SAFE", "REDELIVERED", 0.0, "ALLOW", false)
@@ -2930,13 +2944,12 @@ func handleAPIQuarantineAction(w http.ResponseWriter, r *http.Request) {
 						ClientIP:      r.RemoteAddr,
 						ClaimedKey:    "quarantine_redeliver",
 						UserAgent:     r.UserAgent(),
-						Payload:       payload.RawRequest,
+						Payload:       rawReqStr,
 					})
-				}(req.SessionID, *lastPayload)
+				}(req.SessionID, rawPayload)
 			}
 		}
 	} else {
-		// Reject / Permanent Block path
 		state, err := getSessionState(req.SessionID)
 		if err == nil {
 			state.Lock()
@@ -2948,12 +2961,10 @@ func handleAPIQuarantineAction(w http.ResponseWriter, r *http.Request) {
 			state.Unlock()
 			StoreSessionState(uuidStr, state)
 			
-			// Log the confirmed permanent block transaction
 			newTxID := uuid.New().String()
 			_ = LogTransactionState(newTxID, req.SessionID, int(OBS_INPUT_ERROR), 4.2, vfe, 4.2, true)
 			logSecurityAuditEvent(newTxID, req.SessionID, "quarantine_reject", "MALICIOUS", "PERMANENT_BLOCK", vfe, "BLOCK", true)
 			
-			// Upload audit log to MinIO
 			UploadAuditLogAsync(newTxID, AuditLogPayload{
 				TransactionID: newTxID,
 				SessionID:     req.SessionID,
@@ -2973,6 +2984,70 @@ func handleAPIQuarantineAction(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "SUCCESS"})
+}
+
+func getQuarantinedPayload(sessionID string) (string, error) {
+	sessUUID, err := resolveSessionUUID(sessionID)
+	if err != nil {
+		return "", err
+	}
+
+	if DB == nil {
+		return "", fmt.Errorf("DB is not initialized")
+	}
+
+	var txUUID uuid.UUID
+	var updatedAt time.Time
+	err = DB.QueryRow(`
+		SELECT transaction_id, updated_at 
+		FROM runtime_inference_state 
+		WHERE session_id = $1 AND is_blocked = true 
+		ORDER BY updated_at DESC LIMIT 1`, 
+		sessUUID,
+	).Scan(&txUUID, &updatedAt)
+	if err != nil {
+		return "", fmt.Errorf("no quarantined transaction metadata found in database: %v", err)
+	}
+
+	txID := txUUID.String()
+
+	if minioClient == nil || minioBucket == "" {
+		return "", fmt.Errorf("MinIO is not configured")
+	}
+
+	dateStr := updatedAt.Format("2006-01-02")
+	objectName := fmt.Sprintf("audit/%s/%s.json", dateStr, txID)
+	
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	obj, err := minioClient.GetObject(ctx, minioBucket, objectName, minio.GetObjectOptions{})
+	if err != nil {
+		return "", fmt.Errorf("failed to open object from MinIO: %v", err)
+	}
+	defer obj.Close()
+
+	var auditLog AuditLogPayload
+	if err := json.NewDecoder(obj).Decode(&auditLog); err != nil {
+		return "", fmt.Errorf("failed to decode audit log JSON: %v", err)
+	}
+
+	var payloadStr string
+	switch p := auditLog.Payload.(type) {
+	case string:
+		payloadStr = p
+	default:
+		bytesVal, err := json.Marshal(p)
+		if err == nil {
+			payloadStr = string(bytesVal)
+		}
+	}
+
+	if payloadStr == "" {
+		return "", fmt.Errorf("compliance log payload field is empty")
+	}
+
+	return payloadStr, nil
 }
 
 func handleMinIOListBuckets(w http.ResponseWriter, r *http.Request) {
