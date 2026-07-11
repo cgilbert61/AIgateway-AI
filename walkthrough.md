@@ -234,4 +234,9 @@ We completed a comprehensive load-testing round to address the simulation backup
 - **MinIO-Backed Retrieval**: Added API endpoint `GET /api/transaction/detail` which retrieves full payload details (raw request prompts, translated prompts, response payloads, client IP, agent key, and user agent) on-demand by querying the Go memory cache, the **MinIO WORM Compliance Datalake** (`compliance-audit-logs` bucket at `audit/YYYY-MM-DD/<tx_id>.json`), and PostgreSQL forensic database tables (`agent_forensic_log`).
 - **Review in Quarantine**: Provides deep-linking action buttons to inspect blocked sessions directly in the Quarantine Workspace.
 
+### 8. Datalake-Backed Quarantine Rehydration Fallback
+- **Persistent Recovery Workflow**: Implemented a datalake-backed recovery helper `getQuarantinedPayload(sessionID)` in [gateway/main.go](file:///c:/Users/chuck/AIAIAI/gateway/main.go) for quarantine approvals.
+- **Wiped Cache Fallback**: If the gateway is restarted or its in-memory session cache is evicted under memory pressure, the in-memory payload history is lost. Approving a quarantined item will now query PostgreSQL for the latest blocked transaction metadata for that session, query the **MinIO WORM Compliance Datalake** for the archived audit JSON (`audit/YYYY-MM-DD/<tx_id>.json`), extract the raw request payload, and redeliver it to the upstream LLM.
+- **Zero-Data-Loss Release**: This ensures that regardless of container restarts, database resets, or long-term containment, quarantined requests are never lost and can always be released with their full, original payloads.
+
 ---
