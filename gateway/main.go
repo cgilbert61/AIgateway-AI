@@ -2872,9 +2872,8 @@ func handleAPIQuarantineAction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if approved {
-		val, ok := sessionCache.Load(uuidStr)
-		if ok {
-			state := val.(*ActiveInfState)
+		state, err := getSessionState(req.SessionID)
+		if err == nil {
 			state.Lock()
 			state.LeakyVFE = 0.0
 			state.CurrentAction = ACTION_ALLOW
@@ -2901,9 +2900,8 @@ func handleAPIQuarantineAction(w http.ResponseWriter, r *http.Request) {
 					log.Printf("[QUARANTINE_REDELIVER] Upstream returned status %d (bytes: %d)", statusCode, len(respBytes))
 					
 					// Update memory cache with response so it can be retrieved by UI
-					valLatest, okLatest := sessionCache.Load(sessID)
-					if okLatest {
-						stateLatest := valLatest.(*ActiveInfState)
+					stateLatest, errLatest := getSessionState(sessID)
+					if errLatest == nil {
 						stateLatest.Lock()
 						for idx := len(stateLatest.HistoryPayloads) - 1; idx >= 0; idx-- {
 							if stateLatest.HistoryPayloads[idx].TxID == payload.TxID {
@@ -2932,10 +2930,44 @@ func handleAPIQuarantineAction(w http.ResponseWriter, r *http.Request) {
 						ClientIP:      r.RemoteAddr,
 						ClaimedKey:    "quarantine_redeliver",
 						UserAgent:     r.UserAgent(),
-						Payload:       lastPayload.RawRequest,
+						Payload:       payload.RawRequest,
 					})
 				}(req.SessionID, *lastPayload)
 			}
+		}
+	} else {
+		// Reject / Permanent Block path
+		state, err := getSessionState(req.SessionID)
+		if err == nil {
+			state.Lock()
+			state.CurrentAction = ACTION_BLOCK
+			vfe := state.LeakyVFE
+			if vfe < 3.5 {
+				vfe = 3.5
+			}
+			state.Unlock()
+			StoreSessionState(uuidStr, state)
+			
+			// Log the confirmed permanent block transaction
+			newTxID := uuid.New().String()
+			_ = LogTransactionState(newTxID, req.SessionID, int(OBS_INPUT_ERROR), 4.2, vfe, 4.2, true)
+			logSecurityAuditEvent(newTxID, req.SessionID, "quarantine_reject", "MALICIOUS", "PERMANENT_BLOCK", vfe, "BLOCK", true)
+			
+			// Upload audit log to MinIO
+			UploadAuditLogAsync(newTxID, AuditLogPayload{
+				TransactionID: newTxID,
+				SessionID:     req.SessionID,
+				Observation:   int(OBS_INPUT_ERROR),
+				VFEScore:      vfe,
+				VFEScoreL1:    4.2,
+				VFEScoreL3:    4.2,
+				IsBlocked:     true,
+				Timestamp:     time.Now(),
+				ClientIP:      r.RemoteAddr,
+				ClaimedKey:    "quarantine_reject",
+				UserAgent:     r.UserAgent(),
+				Payload:       "QUARANTINED REQUEST PERMANENTLY REJECTED/BLOCKED BY SECURITY ANALYST",
+			})
 		}
 	}
 
