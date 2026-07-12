@@ -2,8 +2,11 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"regexp"
 	"strings"
@@ -11,6 +14,7 @@ import (
 	"time"
 
 	"github.com/open-policy-agent/opa/rego"
+	redis "github.com/redis/go-redis/v9"
 )
 
 var (
@@ -24,6 +28,28 @@ var (
 	preparedRegoQuery *rego.PreparedEvalQuery
 	regoCompileMutex  sync.RWMutex
 )
+
+func isEntityEnabled(entityName string) bool {
+	entitiesStr := GatewayConfig.DLPPresidioEntities
+	if entitiesStr == "none" {
+		return false
+	}
+	if entitiesStr == "" {
+		// Default enabled entities if none configured
+		defaultEntities := map[string]bool{
+			"PERSON": true, "LOCATION": true, "ORGANIZATION": true, "DATE_TIME": true,
+			"EMAIL_ADDRESS": true, "PHONE_NUMBER": true, "CREDIT_CARD": true, "US_SSN": true,
+		}
+		return defaultEntities[entityName]
+	}
+	parts := strings.Split(entitiesStr, ",")
+	for _, p := range parts {
+		if strings.TrimSpace(p) == entityName {
+			return true
+		}
+	}
+	return false
+}
 
 // AgentPayload captures standard and JSON-RPC tool parameters
 type AgentPayload struct {
@@ -74,8 +100,10 @@ func ClassifyRequest(sessionID string, body []byte, isAgentRoute bool, state *Ac
 	// This prevents the previous request's decided action (e.g. BLOCK) from leaking into the token transitions.
 	l1Action := ACTION_ALLOW
 
-	// Reset Layer 1 beliefs to baseline at the start of every request to make it stateless
-	state.L1Beliefs = []float64{GatewayConfig.L1BaselineSafe, GatewayConfig.L1BaselineSusp, GatewayConfig.L1BaselineMal}
+	// Persist L1 beliefs between requests; only initialize if empty to support streaming and fragmented packets
+	if len(state.L1Beliefs) == 0 {
+		state.L1Beliefs = []float64{GatewayConfig.L1BaselineSafe, GatewayConfig.L1BaselineSusp, GatewayConfig.L1BaselineMal}
+	}
 
 	for _, tok := range tokens {
 		_, vfe := state.UpdateL1Perception(&l1Action, tok)
@@ -88,18 +116,103 @@ func ClassifyRequest(sessionID string, body []byte, isAgentRoute bool, state *Ac
 	}
 
 	textToScan := string(body)
-	if !isAgentRoute {
+	var fullTextToScan string
+
+	if isAgentRoute {
+		// 1. Detect and parse Agent Tool Call (JSON-RPC or standard)
+		var agentPayload AgentPayload
+		if err := json.Unmarshal(body, &agentPayload); err == nil {
+			var sb strings.Builder
+			if agentPayload.Method != "" {
+				sb.WriteString(agentPayload.Method)
+				sb.WriteString(" ")
+			}
+			if agentPayload.Tool != "" {
+				sb.WriteString(agentPayload.Tool)
+				sb.WriteString(" ")
+			}
+			if agentPayload.Params.Name != "" {
+				sb.WriteString(agentPayload.Params.Name)
+				sb.WriteString(" ")
+			}
+			if len(agentPayload.Params.Arguments) > 0 {
+				sb.Write(agentPayload.Params.Arguments)
+				sb.WriteString(" ")
+			}
+			if len(agentPayload.Args) > 0 {
+				sb.Write(agentPayload.Args)
+				sb.WriteString(" ")
+			}
+			fullTextToScan = sb.String()
+		} else {
+			fullTextToScan = string(body)
+		}
+
+		// 2. Dynamic Suffix Slicing (The Agent Shield)
+		prevText := state.LastProcessedText
+
+		if prevText != "" && strings.HasPrefix(fullTextToScan, prevText) {
+			textToScan = fullTextToScan[len(prevText):]
+		} else {
+			textToScan = fullTextToScan
+		}
+	} else {
+		// 1. Detect and parse Chat Completion
 		var chatReq struct {
 			Messages []struct {
+				Role    string `json:"role"`
 				Content string `json:"content"`
 			} `json:"messages"`
 		}
 		if err := json.Unmarshal(body, &chatReq); err == nil && len(chatReq.Messages) > 0 {
-			textToScan = chatReq.Messages[len(chatReq.Messages)-1].Content
+			historyMatched := false
+			if len(chatReq.Messages) > 1 {
+				h := sha256.New()
+				for i := 0; i < len(chatReq.Messages)-1; i++ {
+					h.Write([]byte(chatReq.Messages[i].Role + ":" + chatReq.Messages[i].Content))
+				}
+				historyHash := hex.EncodeToString(h.Sum(nil))
+				if state.ProcessedHistoryHash == historyHash {
+					historyMatched = true
+				}
+			} else {
+				if state.ProcessedHistoryHash == "" {
+					historyMatched = true
+				}
+			}
+
+			if historyMatched {
+				// History matches approved log; scan only latest message to avoid VFE history loop spikes
+				textToScan = chatReq.Messages[len(chatReq.Messages)-1].Content
+			} else {
+				// History has been tampered/modified or is a new session; scan entire chat message history
+				var sb strings.Builder
+				for _, msg := range chatReq.Messages {
+					sb.WriteString(msg.Content)
+					sb.WriteString(" ")
+				}
+				textToScan = sb.String()
+			}
 		}
+		fullTextToScan = textToScan
 	}
 
-	hasPII := ssnRegex.MatchString(textToScan) || ccRegex.MatchString(textToScan) || emailRegex.MatchString(textToScan) || phoneRegex.MatchString(textToScan) || addrRegex.MatchString(textToScan)
+
+
+	var hasPII bool
+	if state.Theta < 4.5 {
+		if isEntityEnabled("US_SSN") && ssnRegex.MatchString(textToScan) {
+			hasPII = true
+		} else if isEntityEnabled("CREDIT_CARD") && ccRegex.MatchString(textToScan) {
+			hasPII = true
+		} else if isEntityEnabled("EMAIL_ADDRESS") && emailRegex.MatchString(textToScan) {
+			hasPII = true
+		} else if isEntityEnabled("PHONE_NUMBER") && phoneRegex.MatchString(textToScan) {
+			hasPII = true
+		} else if isEntityEnabled("LOCATION") && addrRegex.MatchString(textToScan) {
+			hasPII = true
+		}
+	}
 
 	textBody := strings.ToLower(textToScan)
 	injectionKeywords := []string{
@@ -114,23 +227,28 @@ func ClassifyRequest(sessionID string, body []byte, isAgentRoute bool, state *Ac
 		}
 	}
 
-	if hasPII || hasInjection {
+	state.IsLastRequestPII = hasPII
+
+	if hasInjection {
 		avgL1VFE = 4.2
+	} else if hasPII {
+		avgL1VFE = 2.5
 	}
 
 	state.HistoryL1VFE = append(state.HistoryL1VFE, avgL1VFE)
+
+	var retVal int = OBS_READ
 
 	// Bottom-up Surprise Mapping:
 	// If syntactic surprise (VFE) is high, map to appropriate L2 observation
 	if avgL1VFE > 2.0 {
 		if hasPII || hasInjection {
-			return OBS_INPUT_ERROR
+			retVal = OBS_INPUT_ERROR
+		} else {
+			retVal = OBS_STRUCTURE_SHIFT
 		}
-		return OBS_STRUCTURE_SHIFT
-	}
-
-	// Heuristics fallback for agent actions (e.g. dangerous command keywords)
-	if isAgentRoute {
+	} else if isAgentRoute {
+		// Heuristics fallback for agent actions (e.g. dangerous command keywords)
 		var payload AgentPayload
 		_ = json.Unmarshal(body, &payload)
 		toolName := ""
@@ -147,17 +265,43 @@ func ClassifyRequest(sessionID string, body []byte, isAgentRoute bool, state *Ac
 			}
 			for _, key := range dangerousKeywords {
 				if strings.Contains(toolName, key) {
-					return OBS_STRUCTURE_SHIFT
+					retVal = OBS_STRUCTURE_SHIFT
+					break
 				}
 			}
 		}
 	}
 
-	return OBS_READ
+	if isAgentRoute {
+		state.LastProcessedText = fullTextToScan
+		state.LastProcessedTextTime = time.Now()
+	}
+
+	return retVal
 }
 
 // checkRateLimit implements sliding window rate limiting per session
 func checkRateLimit(sessionID string) bool {
+	if redisClient != nil {
+		key := fmt.Sprintf("ratelimit:%s", sessionID)
+		nowNano := time.Now().UnixNano()
+		windowStart := nowNano - int64(2*time.Second)
+
+		pipe := redisClient.TxPipeline()
+		pipe.ZRemRangeByScore(redisCtx, key, "0", fmt.Sprintf("%d", windowStart))
+		pipe.ZAdd(redisCtx, key, redis.Z{Score: float64(nowNano), Member: nowNano})
+		pipe.ZCard(redisCtx, key)
+		pipe.Expire(redisCtx, key, 5*time.Second)
+
+		cmds, err := pipe.Exec(redisCtx)
+		if err == nil && len(cmds) >= 3 {
+			if countCmd, ok := cmds[2].(*redis.IntCmd); ok {
+				count, _ := countCmd.Result()
+				return count <= 15
+			}
+		}
+	}
+
 	rateMutex.Lock()
 	defer rateMutex.Unlock()
 
@@ -185,11 +329,32 @@ func checkRateLimit(sessionID string) bool {
 	return len(validTimes) <= limit
 }
 
-// RedactPII replaces PII patterns in the request body with unique placeholder tokens
-func RedactPII(body []byte) ([]byte, map[string]string) {
+type PresidioResponse struct {
+	Start      int     `json:"start"`
+	End        int     `json:"end"`
+	EntityType string  `json:"entity_type"`
+	Score      float64 `json:"score"`
+}
+
+// RedactPII replaces PII patterns in the request body with unique placeholder tokens.
+// If triggerNLP is true and the DLP provider is set to "presidio", it also scans via Microsoft Presidio sidecar.
+func RedactPII(body []byte, triggerNLP bool) ([]byte, map[string]string) {
 	if len(body) == 0 {
 		return body, nil
 	}
+
+	// 1. Run regex-based redaction on the entire body first
+	redactedBody, rehydrateMap := runRegexRedaction(body)
+
+	// 2. Run Presidio NLP redaction on the user message if triggered
+	if triggerNLP && GatewayConfig.DLPProvider == "presidio" {
+		redactedBody, rehydrateMap = runPresidioRedaction(redactedBody, rehydrateMap)
+	}
+
+	return redactedBody, rehydrateMap
+}
+
+func runRegexRedaction(body []byte) ([]byte, map[string]string) {
 	text := string(body)
 	rehydrateMap := make(map[string]string)
 	counter := 1
@@ -203,13 +368,152 @@ func RedactPII(body []byte) ([]byte, map[string]string) {
 		})
 	}
 
-	replaceFunc(ssnRegex, "REDACTED_SSN")
-	replaceFunc(ccRegex, "REDACTED_CC")
-	replaceFunc(emailRegex, "REDACTED_EMAIL")
-	replaceFunc(phoneRegex, "REDACTED_PHONE")
-	replaceFunc(addrRegex, "REDACTED_ADDRESS")
+	if isEntityEnabled("US_SSN") {
+		replaceFunc(ssnRegex, "REDACTED_SSN")
+	}
+	if isEntityEnabled("CREDIT_CARD") {
+		replaceFunc(ccRegex, "REDACTED_CC")
+	}
+	if isEntityEnabled("EMAIL_ADDRESS") {
+		replaceFunc(emailRegex, "REDACTED_EMAIL")
+	}
+	if isEntityEnabled("PHONE_NUMBER") {
+		replaceFunc(phoneRegex, "REDACTED_PHONE")
+	}
+	if isEntityEnabled("LOCATION") {
+		replaceFunc(addrRegex, "REDACTED_ADDRESS")
+	}
 
 	return []byte(text), rehydrateMap
+}
+
+func runPresidioRedaction(body []byte, rehydrateMap map[string]string) ([]byte, map[string]string) {
+	var req struct {
+		Model    string `json:"model"`
+		Messages []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		logSecurityAuditEvent("siem-dlp-fail", "", "dlp_sidecar", "MONITOR", "DLP_PARSE_FAIL", 0.0, "ALLOW", false)
+		return body, rehydrateMap
+	}
+
+	if len(req.Messages) == 0 {
+		return body, rehydrateMap
+	}
+
+	lastIdx := len(req.Messages) - 1
+	originalContent := req.Messages[lastIdx].Content
+	if originalContent == "" {
+		return body, rehydrateMap
+	}
+
+	// Call Presidio sidecar
+	redactedContent, updatedMap, err := callPresidioSidecar(originalContent, rehydrateMap)
+	if err != nil {
+		// Fail-open: log error, raise SIEM alert, and return original body
+		// Raise SIEM alert
+		newTxID := "siem-dlp-" + fmt.Sprintf("%d", time.Now().UnixNano())
+		logSecurityAuditEvent(newTxID, "", "dlp_sidecar", "MONITOR", "DLP_SIDE_FAIL", 0.0, "ALLOW", false)
+		return body, rehydrateMap
+	}
+
+	req.Messages[lastIdx].Content = redactedContent
+
+	newBody, err := json.Marshal(req)
+	if err != nil {
+		return body, rehydrateMap
+	}
+
+	return newBody, updatedMap
+}
+
+func callPresidioSidecar(text string, rehydrateMap map[string]string) (string, map[string]string, error) {
+	endpoint := GatewayConfig.DLPEndpoint
+	if endpoint == "" {
+		endpoint = "http://aiaiai_dlp_sidecar:5001"
+	}
+	url := endpoint
+	if !strings.HasSuffix(endpoint, "/analyze") {
+		url = fmt.Sprintf("%s/analyze", endpoint)
+	}
+
+	entitiesList := []string{"PERSON", "LOCATION", "ORGANIZATION", "DATE_TIME"}
+	if GatewayConfig.DLPPresidioEntities != "" {
+		parts := strings.Split(GatewayConfig.DLPPresidioEntities, ",")
+		var cleaned []string
+		for _, p := range parts {
+			trimmed := strings.TrimSpace(p)
+			if trimmed != "" {
+				cleaned = append(cleaned, trimmed)
+			}
+		}
+		if len(cleaned) > 0 {
+			entitiesList = cleaned
+		}
+	}
+
+	reqPayload := map[string]interface{}{
+		"text":     text,
+		"language": "en",
+		"entities": entitiesList,
+	}
+
+	jsonBytes, err := json.Marshal(reqPayload)
+	if err != nil {
+		return text, rehydrateMap, err
+	}
+
+	// Create client with 2000ms timeout to handle cold-start NLP model loading
+	client := &http.Client{
+		Timeout: 2000 * time.Millisecond,
+	}
+
+	resp, err := client.Post(url, "application/json", strings.NewReader(string(jsonBytes)))
+	if err != nil {
+		return text, rehydrateMap, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return text, rehydrateMap, fmt.Errorf("sidecar returned status %d", resp.StatusCode)
+	}
+
+	var results []PresidioResponse
+	if err := json.NewDecoder(resp.Body).Decode(&results); err != nil {
+		return text, rehydrateMap, err
+	}
+
+	// Sort results by Start descending to redact from right to left
+	for i := 0; i < len(results); i++ {
+		for j := i + 1; j < len(results); j++ {
+			if results[i].Start < results[j].Start {
+				results[i], results[j] = results[j], results[i]
+			}
+		}
+	}
+
+	counter := len(rehydrateMap) + 1
+	runes := []rune(text)
+
+	for _, res := range results {
+		if res.Start < 0 || res.End > len(runes) || res.Start >= res.End {
+			continue
+		}
+		originalStr := string(runes[res.Start:res.End])
+		placeholder := fmt.Sprintf("[REDACTED_%s_%d]", res.EntityType, counter)
+		counter++
+
+		rehydrateMap[placeholder] = originalStr
+
+		prefix := runes[:res.Start]
+		suffix := runes[res.End:]
+		runes = append(append([]rune{}, prefix...), append([]rune(placeholder), suffix...)...)
+	}
+
+	return string(runes), rehydrateMap, nil
 }
 
 // RehydrateResponse replaces PII placeholder tokens in the response body with original values

@@ -13,7 +13,9 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -64,6 +66,15 @@ type Config struct {
 	// Request Deduplication settings
 	DeduplicateWindowMs int `json:"deduplicate_window_ms"`
 	DeduplicateLimit    int `json:"deduplicate_limit"`
+
+	// MinIO object locking setting
+	MinioObjectLocking bool `json:"minio_object_locking"`
+
+	// Compliance logging provider: s3, local, none
+	ComplianceLoggingProvider string `json:"compliance_logging_provider"`
+
+	// Presidio NLP entity settings
+	DLPPresidioEntities string `json:"dlp_presidio_entities"`
 }
 
 type SimManager struct {
@@ -164,12 +175,16 @@ func main() {
 		mux1.HandleFunc("/api/siem/config", handleAPISIEMConfig)
 		mux1.HandleFunc("/api/quarantine/list", handleAPIQuarantineList)
 		mux1.HandleFunc("/api/quarantine/action", handleAPIQuarantineAction)
+		mux1.HandleFunc("/api/costing/summary", handleAPICostingSummary)
+		mux1.HandleFunc("/api/costing/pricing-index", handleAPICostingPricingIndex)
+		mux1.HandleFunc("/api/costing/transactions", handleAPICostingTransactions)
 		mux1.HandleFunc("/api/minio/buckets", handleMinIOListBuckets)
 		mux1.HandleFunc("/api/minio/objects", handleMinIOListObjects)
 		mux1.HandleFunc("/api/minio/object/content", handleMinIOGetObjectContent)
 		mux1.HandleFunc("/api/minio/object/upload", handleMinIOUploadObject)
 		mux1.HandleFunc("/flow.html", handleFlowPage)
 		mux1.HandleFunc("/quarantine.html", handleQuarantinePage)
+		mux1.HandleFunc("/costing.html", handleCostingPage)
 		mux1.HandleFunc("/playground.html", handlePlaygroundPage)
 		mux1.HandleFunc("/api/playground/policy", handleAPIPlaygroundGetPolicy)
 		mux1.HandleFunc("/api/playground/simulate", handleAPIPlaygroundSimulate)
@@ -199,8 +214,12 @@ func main() {
 	mux2.HandleFunc("/api/siem/config", handleAPISIEMConfig)
 	mux2.HandleFunc("/api/quarantine/list", handleAPIQuarantineList)
 	mux2.HandleFunc("/api/quarantine/action", handleAPIQuarantineAction)
+	mux2.HandleFunc("/api/costing/summary", handleAPICostingSummary)
+	mux2.HandleFunc("/api/costing/pricing-index", handleAPICostingPricingIndex)
+	mux2.HandleFunc("/api/costing/transactions", handleAPICostingTransactions)
 	mux2.HandleFunc("/flow.html", handleFlowPage)
 	mux2.HandleFunc("/quarantine.html", handleQuarantinePage)
+	mux2.HandleFunc("/costing.html", handleCostingPage)
 
 	log.Printf("Go Configuration Portal listening on 0.0.0.0:1163...")
 	if err := http.ListenAndServe(":1163", mux2); err != nil {
@@ -263,6 +282,10 @@ func initializeConfigDefaults() {
 	}
 	DefaultTheta = GatewayConfig.L4ThreatThreshold
 
+	if GatewayConfig.ComplianceLoggingProvider == "" {
+		GatewayConfig.ComplianceLoggingProvider = "s3"
+	}
+
 	if DB != nil {
 		_, err := DB.Exec(`UPDATE agent_profile_matrices SET threshold_theta = $1`, GatewayConfig.L4ThreatThreshold)
 		if err != nil {
@@ -281,17 +304,28 @@ func getSessionState(sessionID string) (*ActiveInfState, error) {
 
 	if state, ok := GetSessionState(uuidStr); ok {
 		state.SessionUUID = uuidStr
+		state.Lock()
+		if state.Theta != DefaultTheta {
+			if DefaultTheta > state.Theta {
+				state.LeakyVFE = 0.0
+				state.LongTermAnomalyDensity = 0.0
+			}
+			log.Printf("[THETA_SYNC] Session %s threshold state.Theta = %.2f did not match DefaultTheta = %.2f. Syncing.", sessionID, state.Theta, DefaultTheta)
+			state.Theta = DefaultTheta
+			storeSessionStateUnsafe(state.SessionUUID, state)
+		}
+		state.Unlock()
 		return state, nil
 	}
 
 	// Fetch from DB
-	a1, b1, theta, err := GetSessionMatrices(uuidStr)
+	a1, b1, _, err := GetSessionMatrices(uuidStr)
 	if err != nil {
 		return nil, err
 	}
 
 	state := NewActiveInfState(a1, b1)
-	state.Theta = theta
+	state.Theta = DefaultTheta
 	state.SessionUUID = uuidStr
 	StoreSessionState(uuidStr, state)
 	return state, nil
@@ -314,28 +348,28 @@ func handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		sessionID = uuid.New().String()
 	}
 
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
+
 	quarantined, qErr := IsSessionQuarantined(sessionID)
 	if qErr != nil {
 		log.Printf("[Error] Failed to check session quarantine status: %v", qErr)
 	}
-	if quarantined {
+	if quarantined && GatewayConfig.L4ThreatThreshold < 4.5 {
 		txID := uuid.New().String()
 		LogTransactionStateAsync(txID, sessionID, OBS_INPUT_ERROR, 0.0, 0.0, 0.0, true)
-		LogComplianceAuditAsync(txID, sessionID, OBS_INPUT_ERROR, 0.0, 0.0, 0.0, true, r, nil)
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusForbidden)
-		json.NewEncoder(w).Encode(map[string]string{
+		respJSON, _ := json.Marshal(map[string]interface{}{
 			"blocked_reason": "Blocked: Session has been quarantined pending security analyst review.",
 			"error":          "Security Block: G1163RT Session Quarantine",
 		})
-		return
-	}
+		LogComplianceAuditAsync(txID, sessionID, OBS_INPUT_ERROR, 0.0, 0.0, 0.0, true, r, body, getRedactedBodyForBlock(body), nil, respJSON)
 
-
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		http.Error(w, "Bad Request", http.StatusBadRequest)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		w.Write(respJSON)
 		return
 	}
 
@@ -367,8 +401,9 @@ func handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	state.Lock()
+	state.IsAgent = false
 	defer func() {
-		StoreSessionState(state.SessionUUID, state)
+		storeSessionStateUnsafe(state.SessionUUID, state)
 		state.Unlock()
 	}()
 
@@ -425,14 +460,14 @@ func handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		
 		txID := uuid.New().String()
 		LogTransactionStateAsync(txID, sessionID, obs, 4.2, vfe, 0.0, true)
-		LogComplianceAuditAsync(txID, sessionID, obs, 4.2, vfe, 0.0, true, r, body)
-		
 		respJSON, _ := json.Marshal(map[string]interface{}{
 			"error":          "Security Block: OPA Policy Violation",
 			"blocked_reason": fmt.Sprintf("Blocked by Open Policy Agent (OPA): %s", reason),
 		})
+		redacted := getRedactedBodyForBlock(body)
+		LogComplianceAuditAsync(txID, sessionID, obs, 4.2, vfe, 0.0, true, r, body, redacted, nil, respJSON)
 		
-		recordPayloadDetail(sessionID, txID, body, body, nil, respJSON)
+		recordPayloadDetail(sessionID, txID, body, redacted, nil, respJSON)
 		
 		// Log Layer 4 cross-session historical state
 		entityKey := r.Header.Get("Authorization")
@@ -479,6 +514,8 @@ func handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		act := state.CurrentAction
 		prevAction = &act
 	}
+
+	state.IsDuplicateRequest = (state.LastRequestHash != "" && currentHash == state.LastRequestHash && time.Since(state.LastRequestTime) < 2*time.Second)
 
 	beliefs, vfe := state.UpdatePerception(prevAction, obs)
 	qPi, _ := state.SelectActionEFE(beliefs, GatewayConfig.L2PrecisionGamma)
@@ -528,7 +565,6 @@ func handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	LogTransactionStateAsync(txID, sessionID, obs, vfeL1, vfe, vfeL3, isBlocked)
-	LogComplianceAuditAsync(txID, sessionID, obs, vfeL1, vfe, vfeL3, isBlocked, r, body)
 
 	// Identify entity and log Layer 4 cross-session historical state
 	entityKey := r.Header.Get("Authorization")
@@ -604,6 +640,35 @@ func handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	bypassNLP := false
+	if r.Header.Get("X-DLP-Bypass") == "true" {
+		if role == "admin" || role == "system" {
+			bypassNLP = true
+			log.Printf("[DLP_BYPASS] [SESSION: %s] DLP NLP scan bypassed via authorized client role '%s'", sessionID, role)
+		} else {
+			log.Printf("[DLP_BYPASS_DENIED] [SESSION: %s] Non-admin/system role '%s' attempted to bypass DLP scan", sessionID, role)
+		}
+	}
+
+	var chatReq struct {
+		Model string `json:"model"`
+	}
+	_ = json.Unmarshal(body, &chatReq)
+
+	triggerNLP := false
+	if GatewayConfig.DLPProvider == "presidio" && !bypassNLP {
+		modelLower := strings.ToLower(chatReq.Model)
+		isHighCompliance := strings.Contains(modelLower, "compliance") || strings.Contains(modelLower, "secure") || strings.Contains(modelLower, "gpt-4")
+		var lastVFE float64
+		if len(state.HistoryL1VFE) > 0 {
+			lastVFE = state.HistoryL1VFE[len(state.HistoryL1VFE)-1]
+		}
+		if isHighCompliance || lastVFE > 2.5 {
+			triggerNLP = true
+			log.Printf("[DLP_NLP_TRIGGER] [SESSION: %s] Presidio sidecar scan triggered (HighCompliance: %t, VFE: %.2f)", sessionID, isHighCompliance, lastVFE)
+		}
+	}
+
 	if decidedAction == ACTION_BLOCK {
 		blockedReason := generateDetailedBlockReason(body, obs, false)
 		if err := QuarantineSession(sessionID, blockedReason); err != nil {
@@ -615,10 +680,11 @@ func handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		})
 		
 		// Run redaction dry-run for CSO forensic display
-		redactedBody, _ := RedactPII(body)
+		redactedBody, _ := RedactPII(body, triggerNLP)
 		translatedBody, _ := TranslateRequest(GatewayConfig.Provider, GatewayConfig.DefaultModel, redactedBody)
 		
 		recordPayloadDetail(sessionID, txID, body, translatedBody, nil, respJSON)
+		LogComplianceAuditAsync(txID, sessionID, obs, vfeL1, vfe, vfeL3, true, r, body, translatedBody, nil, respJSON)
 
 		// Cache block response details for deduplication
 		state.CacheResponse(currentHash, respJSON, http.StatusForbidden)
@@ -635,7 +701,14 @@ func handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// MONITOR or ALLOW: Forward request to target model (via translation)
-	redactedBody, rehydrateMap := RedactPII(body)
+	redactedBody, rehydrateMap := RedactPII(body, triggerNLP)
+
+	if len(rehydrateMap) > 0 {
+		state.CurrentAction = ACTION_REDACTED
+		if len(state.HistoryAction) > 0 {
+			state.HistoryAction[len(state.HistoryAction)-1] = ACTION_REDACTED
+		}
+	}
 
 	translatedBody, err := TranslateRequest(GatewayConfig.Provider, GatewayConfig.DefaultModel, redactedBody)
 	if err != nil {
@@ -662,9 +735,26 @@ func handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	rehydratedResp := RehydrateResponse(translatedResp, rehydrateMap)
 
 	recordPayloadDetail(sessionID, txID, body, translatedBody, respBytes, rehydratedResp)
+	LogComplianceAuditAsync(txID, sessionID, obs, vfeL1, vfe, vfeL3, false, r, body, translatedBody, respBytes, rehydratedResp)
+	QueueTokenCostCalculation(txID, sessionID, r, rehydratedResp)
 
 	// Cache successful response details for deduplication
 	state.CacheResponse(currentHash, rehydratedResp, statusCode)
+
+	// Update ProcessedHistoryHash with the entire sent request messages array
+	var successChatReq struct {
+		Messages []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(body, &successChatReq); err == nil && len(successChatReq.Messages) > 0 {
+		h := sha256.New()
+		for i := 0; i < len(successChatReq.Messages); i++ {
+			h.Write([]byte(successChatReq.Messages[i].Role + ":" + successChatReq.Messages[i].Content))
+		}
+		state.ProcessedHistoryHash = hex.EncodeToString(h.Sum(nil))
+	}
 
 	if trace != nil {
 		(*trace)["verdict"] = map[string]interface{}{
@@ -692,28 +782,48 @@ func handleAgentAction(w http.ResponseWriter, r *http.Request) {
 		sessionID = uuid.New().String()
 	}
 
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
+
+	clientIP := r.Header.Get("X-Forwarded-For")
+	if clientIP == "" {
+		clientIP = r.RemoteAddr
+	}
+	if idx := strings.LastIndex(clientIP, ":"); idx != -1 {
+		clientIP = clientIP[:idx]
+	}
+	claimedKey := r.Header.Get("X-Agent-Key")
+	if claimedKey == "" {
+		claimedKey = r.Header.Get("Authorization")
+	}
+	userAgent := r.Header.Get("User-Agent")
+	if userAgent == "" {
+		userAgent = "unknown"
+	}
+
 	quarantined, qErr := IsSessionQuarantined(sessionID)
 	if qErr != nil {
 		log.Printf("[Error] Failed to check session quarantine status: %v", qErr)
 	}
-	if quarantined {
+	if quarantined && GatewayConfig.L4ThreatThreshold < 4.5 {
 		txID := uuid.New().String()
 		LogTransactionStateAsync(txID, sessionID, OBS_INPUT_ERROR, 0.0, 0.0, 0.0, true)
-		LogComplianceAuditAsync(txID, sessionID, OBS_INPUT_ERROR, 0.0, 0.0, 0.0, true, r, nil)
+		blockedReason := "Blocked: Session has been quarantined pending security analyst review."
+		respJSON, _ := json.Marshal(map[string]interface{}{
+			"blocked_reason": blockedReason,
+			"error":          "Security Block: G1163RT Session Quarantine",
+		})
+		LogComplianceAuditAsync(txID, sessionID, OBS_INPUT_ERROR, 0.0, 0.0, 0.0, true, r, body, getRedactedBodyForBlock(body), nil, respJSON)
+		if DB != nil {
+			LogForensicEventAsync(txID, clientIP, claimedKey, userAgent, string(body), blockedReason)
+		}
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)
-		json.NewEncoder(w).Encode(map[string]string{
-			"blocked_reason": "Blocked: Session has been quarantined pending security analyst review.",
-			"error":          "Security Block: G1163RT Session Quarantine",
-		})
-		return
-	}
-
-
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		http.Error(w, "Bad Request", http.StatusBadRequest)
+		w.Write(respJSON)
 		return
 	}
 
@@ -745,8 +855,9 @@ func handleAgentAction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	state.Lock()
+	state.IsAgent = true
 	defer func() {
-		StoreSessionState(state.SessionUUID, state)
+		storeSessionStateUnsafe(state.SessionUUID, state)
 		state.Unlock()
 	}()
 
@@ -803,19 +914,22 @@ func handleAgentAction(w http.ResponseWriter, r *http.Request) {
 		
 		txID := uuid.New().String()
 		LogTransactionStateAsync(txID, sessionID, obs, 4.2, vfe, 0.0, true)
-		LogComplianceAuditAsync(txID, sessionID, obs, 4.2, vfe, 0.0, true, r, body)
-		
 		blockedReason := fmt.Sprintf("Blocked by Open Policy Agent (OPA): %s", reason)
 		if err := QuarantineSession(sessionID, blockedReason); err != nil {
 			log.Printf("[Error] Failed to quarantine session: %v", err)
+		}
+		if DB != nil {
+			LogForensicEventAsync(txID, clientIP, claimedKey, userAgent, string(body), blockedReason)
 		}
 
 		respJSON, _ := json.Marshal(map[string]interface{}{
 			"error":          "Security Block: OPA Policy Violation",
 			"blocked_reason": blockedReason,
 		})
+		redacted := getRedactedBodyForBlock(body)
+		LogComplianceAuditAsync(txID, sessionID, obs, 4.2, vfe, 0.0, true, r, body, redacted, nil, respJSON)
 		
-		recordPayloadDetail(sessionID, txID, body, body, nil, respJSON)
+		recordPayloadDetail(sessionID, txID, body, redacted, nil, respJSON)
 		
 		// Log Layer 4 cross-session historical state
 		entityKey := r.Header.Get("Authorization")
@@ -862,6 +976,8 @@ func handleAgentAction(w http.ResponseWriter, r *http.Request) {
 		act := state.CurrentAction
 		prevAction = &act
 	}
+
+	state.IsDuplicateRequest = (state.LastRequestHash != "" && currentHash == state.LastRequestHash && time.Since(state.LastRequestTime) < 2*time.Second)
 
 	beliefs, vfe := state.UpdatePerception(prevAction, obs)
 	qPi, _ := state.SelectActionEFE(beliefs, GatewayConfig.L2PrecisionGamma)
@@ -910,7 +1026,6 @@ func handleAgentAction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	LogTransactionStateAsync(txID, sessionID, obs, vfeL1, vfe, vfeL3, isBlocked)
-	LogComplianceAuditAsync(txID, sessionID, obs, vfeL1, vfe, vfeL3, isBlocked, r, body)
 
 	// Identify entity and log Layer 4 cross-session historical state
 	entityKey := r.Header.Get("Authorization")
@@ -941,7 +1056,6 @@ func handleAgentAction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Structured JSON security audit log
-	claimedKey := r.Header.Get("X-Agent-Key")
 	if claimedKey == "" {
 		claimedKey = "none"
 	}
@@ -988,15 +1102,19 @@ func handleAgentAction(w http.ResponseWriter, r *http.Request) {
 		if err := QuarantineSession(sessionID, blockedReason); err != nil {
 			log.Printf("[Error] Failed to quarantine session: %v", err)
 		}
+		if DB != nil {
+			LogForensicEventAsync(txID, clientIP, claimedKey, userAgent, string(body), blockedReason)
+		}
 		respJSON, _ := json.Marshal(map[string]interface{}{
 			"error":          fmt.Sprintf("Security Block: Active Inference blocked agent tool execution (VFE: %.4f)", vfe),
 			"blocked_reason": blockedReason,
 		})
 		
 		// Run redaction dry-run for CSO forensic display
-		redactedBody, _ := RedactPII(body)
+		redactedBody, _ := RedactPII(body, GatewayConfig.DLPProvider == "presidio")
 		
 		recordPayloadDetail(sessionID, txID, body, redactedBody, nil, respJSON)
+		LogComplianceAuditAsync(txID, sessionID, obs, vfeL1, vfe, vfeL3, true, r, body, redactedBody, nil, respJSON)
 
 		// Cache block response details for deduplication
 		state.CacheResponse(currentHash, respJSON, http.StatusForbidden)
@@ -1021,6 +1139,7 @@ func handleAgentAction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	recordPayloadDetail(sessionID, txID, body, body, respBytes, respBytes)
+	LogComplianceAuditAsync(txID, sessionID, obs, vfeL1, vfe, vfeL3, false, r, body, body, respBytes, respBytes)
 
 	// Cache successful response details for deduplication
 	state.CacheResponse(currentHash, respBytes, statusCode)
@@ -1105,7 +1224,14 @@ func handleEvaluate(w http.ResponseWriter, r *http.Request) {
 		vfeL3 = state.HistoryL3VFE[len(state.HistoryL3VFE)-1]
 	}
 	LogTransactionStateAsync(txID, sessionID, req.Observation, vfeL1, vfe, vfeL3, isBlocked)
-	LogComplianceAuditAsync(txID, sessionID, req.Observation, vfeL1, vfe, vfeL3, isBlocked, r, nil)
+	var respJSON []byte
+	if isBlocked {
+		respJSON, _ = json.Marshal(map[string]interface{}{
+			"error":          "Security Block: Rate Limit Exceeded",
+			"blocked_reason": "Blocked by Rate Limiter: Ingress request flooding detected on session.",
+		})
+	}
+	LogComplianceAuditAsync(txID, sessionID, req.Observation, vfeL1, vfe, vfeL3, isBlocked, r, nil, nil, nil, respJSON)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -1156,7 +1282,7 @@ func handleConfigReload(w http.ResponseWriter, r *http.Request) {
 	if ok {
 		state.Lock()
 		defer func() {
-			StoreSessionState(uuidStr, state)
+			storeSessionStateUnsafe(uuidStr, state)
 			state.Unlock()
 		}()
 
@@ -1601,7 +1727,10 @@ func handleAPISystemStatus(w http.ResponseWriter, r *http.Request) {
 		"l3_precision_gamma":    GatewayConfig.L3PrecisionGamma,
 		"l4_threat_threshold":   GatewayConfig.L4ThreatThreshold,
 		"deduplicate_window_ms": GatewayConfig.DeduplicateWindowMs,
-		"deduplicate_limit":     GatewayConfig.DeduplicateLimit,
+		"deduplicate_limit":           GatewayConfig.DeduplicateLimit,
+		"minio_object_locking":        GatewayConfig.MinioObjectLocking,
+		"compliance_logging_provider": GatewayConfig.ComplianceLoggingProvider,
+		"dlp_presidio_entities":       GatewayConfig.DLPPresidioEntities,
 	})
 }
 
@@ -1651,11 +1780,26 @@ func handleAPIConfigSave(w http.ResponseWriter, r *http.Request) {
 	GatewayConfig = newConfig
 	initializeConfigDefaults()
 
+	if err := saveGatewayConfigToFile(); err != nil {
+		log.Printf("[Error] Failed to save gateway config: %v", err)
+		http.Error(w, "Failed to save configuration", http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("Successfully updated LLM configuration: provider=%s, target=%s", GatewayConfig.Provider, GatewayConfig.BaseURL)
+
+	// Reinitialize MinIO client and buckets dynamically
+	initMinIO()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "SUCCESS"})
+}
+
+func saveGatewayConfigToFile() error {
 	configPath := os.Getenv("GATEWAY_CONFIG_PATH")
 	if configPath == "" {
 		configPath = "/app/config/gateway_config.json"
 	}
-
 	file, err := os.Create(configPath)
 	if err != nil {
 		file, err = os.Create("./config/gateway_config.json")
@@ -1663,24 +1807,11 @@ func handleAPIConfigSave(w http.ResponseWriter, r *http.Request) {
 			file, err = os.Create("../config/gateway_config.json")
 		}
 	}
-
 	if err != nil {
-		log.Printf("[Error] Failed to save gateway config: %v", err)
-		http.Error(w, "Failed to save configuration", http.StatusInternalServerError)
-		return
+		return err
 	}
 	defer file.Close()
-
-	if err := json.NewEncoder(file).Encode(GatewayConfig); err != nil {
-		log.Printf("[Error] Failed to encode gateway config: %v", err)
-		http.Error(w, "Failed to encode configuration", http.StatusInternalServerError)
-		return
-	}
-
-	log.Printf("Successfully updated LLM configuration: provider=%s, target=%s", GatewayConfig.Provider, GatewayConfig.BaseURL)
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "SUCCESS"})
+	return json.NewEncoder(file).Encode(GatewayConfig)
 }
 
 func handleAPIInferenceSettingsSave(w http.ResponseWriter, r *http.Request) {
@@ -1699,39 +1830,36 @@ func handleAPIInferenceSettingsSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.SessionID == "" {
-		http.Error(w, "SessionID is required", http.StatusBadRequest)
-		return
+	// 1. Update global config values
+	GatewayConfig.L4ThreatThreshold = req.ThresholdTheta
+	DefaultTheta = req.ThresholdTheta
+	if err := saveGatewayConfigToFile(); err != nil {
+		log.Printf("[Error] Failed to save updated theta threshold to config file: %v", err)
 	}
 
-	sessUUID, err := resolveSessionUUID(req.SessionID)
-	if err != nil {
-		http.Error(w, "Invalid session_id format: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	_, err = DB.Exec(
-		"UPDATE agent_profile_matrices SET threshold_theta = $1 WHERE session_id = $2",
-		req.ThresholdTheta, sessUUID,
-	)
-	if err != nil {
-		log.Printf("[Error] Failed to update theta threshold: %v", err)
-		http.Error(w, "Database update failed", http.StatusInternalServerError)
-		return
-	}
-
-	state, ok := GetSessionState(sessUUID.String())
-	if ok {
-		a1, b1, theta, err := GetSessionMatrices(sessUUID.String())
-		if err == nil {
-			state.UpdateMatrices(a1, b1)
-			state.Theta = theta
-			StoreSessionState(sessUUID.String(), state)
-			log.Printf("In-memory theta threshold updated by reloading matrices for session %s to %.2f.", sessUUID.String(), theta)
-		} else {
-			DeleteSessionState(sessUUID.String())
+	// 2. Update threat threshold in database for ALL sessions
+	if DB != nil {
+		_, err := DB.Exec("UPDATE agent_profile_matrices SET threshold_theta = $1", req.ThresholdTheta)
+		if err != nil {
+			log.Printf("[Error] Failed to update theta threshold in database: %v", err)
 		}
 	}
+
+	// 3. Update active in-memory session states
+	sessionCache.Range(func(key, val interface{}) bool {
+		state := val.(*ActiveInfState)
+		state.Lock()
+		if req.ThresholdTheta > state.Theta {
+			state.LeakyVFE = 0.0
+			state.LongTermAnomalyDensity = 0.0
+		}
+		state.Theta = req.ThresholdTheta
+		storeSessionStateUnsafe(state.SessionUUID, state)
+		state.Unlock()
+		return true
+	})
+
+	log.Printf("Global active inference threat threshold updated to %.2f across all session states.", req.ThresholdTheta)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "SUCCESS"})
@@ -1853,7 +1981,22 @@ func handleAPISystemReset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 0. Stop the active simulator if it is running to prevent post-reset writes
+	// 1. Reset global active inference parameters back to defaults immediately
+	GatewayConfig.L4ThreatThreshold = 3.5
+	DefaultTheta = 3.5
+	GatewayConfig.L1BaselineSafe = 0.95
+	GatewayConfig.L1BaselineSusp = 0.04
+	GatewayConfig.L1BaselineMal = 0.01
+	GatewayConfig.L2DecayRate = 0.35
+	GatewayConfig.L2PrecisionGamma = 3.0
+	GatewayConfig.L3PrecisionGamma = 15.0
+	GatewayConfig.DeduplicateWindowMs = 500
+	GatewayConfig.DeduplicateLimit = 2
+	if err := saveGatewayConfigToFile(); err != nil {
+		log.Printf("[Error] Failed to save updated configuration to config file: %v", err)
+	}
+
+	// 2. Stop the active simulator if it is running to prevent post-reset writes
 	simulator.Lock()
 	if simulator.isRunning {
 		simulator.cancel()
@@ -1877,11 +2020,11 @@ func handleAPISystemReset(w http.ResponseWriter, r *http.Request) {
 	// Give a small delay for active in-flight worker requests to complete
 	time.Sleep(150 * time.Millisecond)
 
-	// 1. Truncate runtime logs and forensics tables in DB and reset metrics
+	// 3. Truncate runtime logs and forensics tables in DB and reset metrics
 	if DB != nil {
-		_, err := DB.Exec("TRUNCATE TABLE runtime_inference_state, agent_forensic_log, entity_historical_surprise, session_quarantine")
+		_, err := DB.Exec("DELETE FROM runtime_inference_state; DELETE FROM agent_forensic_log; DELETE FROM entity_historical_surprise; DELETE FROM session_quarantine;")
 		if err != nil {
-			log.Printf("[Error] Failed to truncate database tables: %v", err)
+			log.Printf("[Error] Failed to delete database records: %v", err)
 			http.Error(w, "Failed to clear database logs: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -1889,7 +2032,7 @@ func handleAPISystemReset(w http.ResponseWriter, r *http.Request) {
 		ResetLocalMetrics()
 	}
 
-	// 2. Clear all cached session states in Go gateway memory and Redis
+	// 4. Clear all cached session states in Go gateway memory and Redis
 	ClearAllSessionStates()
 	if redisClient != nil {
 		_ = redisClient.Del(redisCtx, "active_inference:logs").Err()
@@ -1901,6 +2044,9 @@ func handleAPISystemReset(w http.ResponseWriter, r *http.Request) {
 		return true
 	})
 	ClearQuarantineCache()
+	
+	// Run MinIO clearance asynchronously to prevent timing out client requests
+	go clearMinIOBucket()
 
 	log.Println("[System] Entire active inference gateway state cache reset and database logs truncated.")
 
@@ -2359,14 +2505,14 @@ func validateAgentKey(w http.ResponseWriter, r *http.Request, body []byte, isAct
 	txID := uuid.New().String()
 	obs := OBS_INPUT_ERROR
 	LogTransactionStateAsync(txID, sessID, obs, 5.0, 5.0, 5.0, true)
-	LogComplianceAuditAsync(txID, sessID, obs, 5.0, 5.0, 5.0, true, r, body)
-
 	respJSON, _ := json.Marshal(map[string]interface{}{
 		"error":          "Security Block: Agent Verification Failed",
 		"blocked_reason": reason,
 	})
+	redacted := getRedactedBodyForBlock(body)
+	LogComplianceAuditAsync(txID, sessID, obs, 5.0, 5.0, 5.0, true, r, body, redacted, nil, respJSON)
 
-	recordPayloadDetail(sessID, txID, body, body, nil, respJSON)
+	recordPayloadDetail(sessID, txID, body, redacted, nil, respJSON)
 
 	if trace != nil {
 		(*trace)["key_validation"] = map[string]interface{}{
@@ -2716,6 +2862,26 @@ func handleQuarantinePage(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, path)
 }
 
+func handleCostingPage(w http.ResponseWriter, r *http.Request) {
+	if setupCORSHeaders(w, r) {
+		return
+	}
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
+	path := "/app/dashboard/costing.html"
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		path = "./dashboard/costing.html"
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			path = "../dashboard/costing.html"
+			if _, err := os.Stat(path); os.IsNotExist(err) {
+				path = "gateway/dashboard/costing.html"
+			}
+		}
+	}
+	http.ServeFile(w, r, path)
+}
+
 func injectTraceAndWrite(w http.ResponseWriter, trace *map[string]interface{}, respBytes []byte, statusCode int) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
@@ -2839,6 +3005,262 @@ func handleAPIQuarantineList(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(items)
 }
 
+func handleAPICostingPricingIndex(w http.ResponseWriter, r *http.Request) {
+	if setupCORSHeaders(w, r) {
+		return
+	}
+	if r.Method == http.MethodGet {
+		type PricingItem struct {
+			ModelName                  string    `json:"model_name"`
+			Provider                   string    `json:"provider"`
+			InputPricePerMillion       float64   `json:"input_price_per_million"`
+			OutputPricePerMillion      float64   `json:"output_price_per_million"`
+			CachedInputPricePerMillion float64   `json:"cached_input_price_per_million"`
+			ReasoningPricePerMillion   float64   `json:"reasoning_price_per_million"`
+			UpdatedAt                  time.Time `json:"updated_at"`
+		}
+		items := []PricingItem{}
+		if DB != nil {
+			rows, err := DB.Query("SELECT model_name, provider, input_price_per_million, output_price_per_million, cached_input_price_per_million, reasoning_price_per_million, updated_at FROM model_pricing ORDER BY model_name ASC")
+			if err == nil {
+				defer rows.Close()
+				for rows.Next() {
+					var item PricingItem
+					if err := rows.Scan(&item.ModelName, &item.Provider, &item.InputPricePerMillion, &item.OutputPricePerMillion, &item.CachedInputPricePerMillion, &item.ReasoningPricePerMillion, &item.UpdatedAt); err == nil {
+						items = append(items, item)
+					}
+				}
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(items)
+		return
+	} else if r.Method == http.MethodPost {
+		var item struct {
+			ModelName                  string  `json:"model_name"`
+			Provider                   string  `json:"provider"`
+			InputPricePerMillion       float64 `json:"input_price_per_million"`
+			OutputPricePerMillion      float64 `json:"output_price_per_million"`
+			CachedInputPricePerMillion float64 `json:"cached_input_price_per_million"`
+			ReasoningPricePerMillion   float64 `json:"reasoning_price_per_million"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&item); err != nil {
+			http.Error(w, "Bad Request", http.StatusBadRequest)
+			return
+		}
+		if item.ModelName == "" || item.Provider == "" {
+			http.Error(w, "Model name and provider are required", http.StatusBadRequest)
+			return
+		}
+		if DB != nil {
+			_, err := DB.Exec(`
+				INSERT INTO model_pricing (model_name, provider, input_price_per_million, output_price_per_million, cached_input_price_per_million, reasoning_price_per_million, updated_at)
+				VALUES ($1, $2, $3, $4, $5, $6, NOW())
+				ON CONFLICT (model_name) DO UPDATE SET 
+					provider = $2,
+					input_price_per_million = $3, 
+					output_price_per_million = $4, 
+					cached_input_price_per_million = $5, 
+					reasoning_price_per_million = $6,
+					updated_at = NOW()
+			`, item.ModelName, item.Provider, item.InputPricePerMillion, item.OutputPricePerMillion, item.CachedInputPricePerMillion, item.ReasoningPricePerMillion)
+			if err != nil {
+				log.Printf("[Error] Failed to save model pricing: %v", err)
+				http.Error(w, "Database Error", http.StatusInternalServerError)
+				return
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"success"}`))
+		return
+	}
+	http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+}
+
+func handleAPICostingTransactions(w http.ResponseWriter, r *http.Request) {
+	if setupCORSHeaders(w, r) {
+		return
+	}
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	limit := 100
+	offset := 0
+	sortBy := "timestamp"
+	order := "desc"
+
+	if lStr := r.URL.Query().Get("limit"); lStr != "" {
+		var val int
+		if _, err := fmt.Sscanf(lStr, "%d", &val); err == nil && val > 0 {
+			limit = val
+		}
+	}
+	if oStr := r.URL.Query().Get("offset"); oStr != "" {
+		var val int
+		if _, err := fmt.Sscanf(oStr, "%d", &val); err == nil && val >= 0 {
+			offset = val
+		}
+	}
+	if s := r.URL.Query().Get("sort_by"); s == "calculated_cost" || s == "prompt_tokens" || s == "completion_tokens" || s == "timestamp" || s == "department" || s == "end_user_id" {
+		sortBy = s
+	}
+	if o := r.URL.Query().Get("order"); o == "asc" || o == "desc" {
+		order = o
+	}
+
+	type TransactionCostItem struct {
+		TransactionID      string    `json:"transaction_id"`
+		SessionID          string    `json:"session_id"`
+		ModelName          string    `json:"model_name"`
+		VirtualAPIKey      string    `json:"virtual_api_key"`
+		Department         string    `json:"department"`
+		EndUserID          string    `json:"end_user_id"`
+		PromptTokens       int       `json:"prompt_tokens"`
+		CompletionTokens   int       `json:"completion_tokens"`
+		CachedPromptTokens int       `json:"cached_prompt_tokens"`
+		ReasoningTokens    int       `json:"reasoning_tokens"`
+		CalculatedCost     float64   `json:"calculated_cost"`
+		Timestamp          time.Time `json:"timestamp"`
+	}
+
+	items := []TransactionCostItem{}
+	if DB != nil {
+		query := fmt.Sprintf(`
+			SELECT transaction_id, session_id, model_name, virtual_api_key, department, end_user_id, prompt_tokens, completion_tokens, cached_prompt_tokens, reasoning_tokens, calculated_cost, timestamp 
+			FROM token_cost_ledger 
+			ORDER BY %s %s 
+			LIMIT $1 OFFSET $2
+		`, sortBy, order)
+
+		rows, err := DB.Query(query, limit, offset)
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var item TransactionCostItem
+				var txUUID, sessUUID uuid.UUID
+				if err := rows.Scan(&txUUID, &sessUUID, &item.ModelName, &item.VirtualAPIKey, &item.Department, &item.EndUserID, &item.PromptTokens, &item.CompletionTokens, &item.CachedPromptTokens, &item.ReasoningTokens, &item.CalculatedCost, &item.Timestamp); err == nil {
+					item.TransactionID = txUUID.String()
+					item.SessionID = sessUUID.String()
+					items = append(items, item)
+				}
+			}
+		} else {
+			log.Printf("[Error] Querying transactions failed: %v", err)
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(items)
+}
+
+func handleAPICostingSummary(w http.ResponseWriter, r *http.Request) {
+	if setupCORSHeaders(w, r) {
+		return
+	}
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	type SummaryGroup struct {
+		GroupKey      string  `json:"group_key"`
+		TotalRequests int     `json:"total_requests"`
+		GroupCost     float64 `json:"group_cost"`
+		GroupSavings  float64 `json:"group_savings"`
+	}
+
+	var totalCost float64
+	var totalSavings float64
+	depts := []SummaryGroup{}
+	users := []SummaryGroup{}
+	keys := []SummaryGroup{}
+
+	if DB != nil {
+		_ = DB.QueryRow(`
+			SELECT 
+				COALESCE(SUM(calculated_cost), 0.0),
+				COALESCE(SUM(cached_prompt_tokens * (COALESCE(mp.input_price_per_million, 5.0) - COALESCE(mp.cached_input_price_per_million, 2.5)) / 1000000.0), 0.0)
+			FROM token_cost_ledger tcl
+			LEFT JOIN model_pricing mp ON tcl.model_name = mp.model_name
+		`).Scan(&totalCost, &totalSavings)
+
+		rows, err := DB.Query(`
+			SELECT 
+				tcl.department,
+				COUNT(*),
+				COALESCE(SUM(tcl.calculated_cost), 0.0),
+				COALESCE(SUM(tcl.cached_prompt_tokens * (COALESCE(mp.input_price_per_million, 5.0) - COALESCE(mp.cached_input_price_per_million, 2.5)) / 1000000.0), 0.0)
+			FROM token_cost_ledger tcl
+			LEFT JOIN model_pricing mp ON tcl.model_name = mp.model_name
+			GROUP BY tcl.department
+			ORDER BY COALESCE(SUM(tcl.calculated_cost), 0.0) DESC
+		`)
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var g SummaryGroup
+				if err := rows.Scan(&g.GroupKey, &g.TotalRequests, &g.GroupCost, &g.GroupSavings); err == nil {
+					depts = append(depts, g)
+				}
+			}
+		}
+
+		rows, err = DB.Query(`
+			SELECT 
+				tcl.end_user_id,
+				COUNT(*),
+				COALESCE(SUM(tcl.calculated_cost), 0.0),
+				COALESCE(SUM(tcl.cached_prompt_tokens * (COALESCE(mp.input_price_per_million, 5.0) - COALESCE(mp.cached_input_price_per_million, 2.5)) / 1000000.0), 0.0)
+			FROM token_cost_ledger tcl
+			LEFT JOIN model_pricing mp ON tcl.model_name = mp.model_name
+			GROUP BY tcl.end_user_id
+			ORDER BY COALESCE(SUM(tcl.calculated_cost), 0.0) DESC
+			LIMIT 50
+		`)
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var g SummaryGroup
+				if err := rows.Scan(&g.GroupKey, &g.TotalRequests, &g.GroupCost, &g.GroupSavings); err == nil {
+					users = append(users, g)
+				}
+			}
+		}
+
+		rows, err = DB.Query(`
+			SELECT 
+				tcl.virtual_api_key,
+				COUNT(*),
+				COALESCE(SUM(tcl.calculated_cost), 0.0),
+				COALESCE(SUM(tcl.cached_prompt_tokens * (COALESCE(mp.input_price_per_million, 5.0) - COALESCE(mp.cached_input_price_per_million, 2.5)) / 1000000.0), 0.0)
+			FROM token_cost_ledger tcl
+			LEFT JOIN model_pricing mp ON tcl.model_name = mp.model_name
+			GROUP BY tcl.virtual_api_key
+			ORDER BY COALESCE(SUM(tcl.calculated_cost), 0.0) DESC
+		`)
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var g SummaryGroup
+				if err := rows.Scan(&g.GroupKey, &g.TotalRequests, &g.GroupCost, &g.GroupSavings); err == nil {
+					keys = append(keys, g)
+				}
+			}
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"total_cost":    totalCost,
+		"total_savings": totalSavings,
+		"departments":   depts,
+		"users":         users,
+		"keys":          keys,
+	})
+}
+
 func handleAPIQuarantineAction(w http.ResponseWriter, r *http.Request) {
 	if setupCORSHeaders(w, r) {
 		return
@@ -2865,6 +3287,10 @@ func handleAPIQuarantineAction(w http.ResponseWriter, r *http.Request) {
 	uuidStr := sessUUID.String()
 
 	approved := req.Action == "APPROVE"
+	if err := ResolveQuarantine(req.SessionID, approved); err != nil {
+		log.Printf("[Error] Failed to resolve quarantine database state: %v", err)
+	}
+
 	if approved {
 		state, err := getSessionState(req.SessionID)
 		if err == nil {
@@ -2996,58 +3422,87 @@ func getQuarantinedPayload(sessionID string) (string, error) {
 		return "", fmt.Errorf("DB is not initialized")
 	}
 
-	var txUUID uuid.UUID
-	var updatedAt time.Time
-	err = DB.QueryRow(`
+	rows, err := DB.Query(`
 		SELECT transaction_id, updated_at 
 		FROM runtime_inference_state 
 		WHERE session_id = $1 AND is_blocked = true 
-		ORDER BY updated_at DESC LIMIT 1`, 
+		ORDER BY updated_at DESC`,
 		sessUUID,
-	).Scan(&txUUID, &updatedAt)
+	)
 	if err != nil {
-		return "", fmt.Errorf("no quarantined transaction metadata found in database: %v", err)
+		return "", fmt.Errorf("failed to query blocked transactions: %v", err)
 	}
+	defer rows.Close()
 
-	txID := txUUID.String()
+	for rows.Next() {
+		var txUUID uuid.UUID
+		var updatedAt time.Time
+		if err := rows.Scan(&txUUID, &updatedAt); err != nil {
+			continue
+		}
+		txID := txUUID.String()
+		dateStr := updatedAt.Format("2006-01-02")
 
-	if minioClient == nil || minioBucket == "" {
-		return "", fmt.Errorf("MinIO is not configured")
-	}
+		var fileData []byte
+		if GatewayConfig.ComplianceLoggingProvider == "local" {
+			objectNames := []string{
+				filepath.Join("audit", dateStr, fmt.Sprintf("%s.json", txID)),
+				filepath.Join("audit", dateStr, fmt.Sprintf("blocked_%s.json", txID)),
+			}
+			for _, name := range objectNames {
+				filePath := filepath.Join("/app/data/compliance_logs", name)
+				if data, err := os.ReadFile(filePath); err == nil {
+					fileData = data
+					break
+				}
+			}
+		} else if minioClient != nil && minioBucket != "" {
+			objectNames := []string{
+				fmt.Sprintf("audit/%s/%s.json", dateStr, txID),
+				fmt.Sprintf("audit/%s/blocked_%s.json", dateStr, txID),
+			}
+			for _, name := range objectNames {
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				obj, err := minioClient.GetObject(ctx, minioBucket, name, minio.GetObjectOptions{})
+				if err == nil {
+					if stat, statErr := obj.Stat(); statErr == nil && stat.Size > 0 {
+						buf := new(bytes.Buffer)
+						if _, copyErr := io.Copy(buf, obj); copyErr == nil {
+							fileData = buf.Bytes()
+							obj.Close()
+							cancel()
+							break
+						}
+					}
+					obj.Close()
+				}
+				cancel()
+			}
+		}
 
-	dateStr := updatedAt.Format("2006-01-02")
-	objectName := fmt.Sprintf("audit/%s/%s.json", dateStr, txID)
-	
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	obj, err := minioClient.GetObject(ctx, minioBucket, objectName, minio.GetObjectOptions{})
-	if err != nil {
-		return "", fmt.Errorf("failed to open object from MinIO: %v", err)
-	}
-	defer obj.Close()
-
-	var auditLog AuditLogPayload
-	if err := json.NewDecoder(obj).Decode(&auditLog); err != nil {
-		return "", fmt.Errorf("failed to decode audit log JSON: %v", err)
-	}
-
-	var payloadStr string
-	switch p := auditLog.Payload.(type) {
-	case string:
-		payloadStr = p
-	default:
-		bytesVal, err := json.Marshal(p)
-		if err == nil {
-			payloadStr = string(bytesVal)
+		if len(fileData) > 0 {
+			var logPayload AuditLogPayload
+			if err := json.Unmarshal(fileData, &logPayload); err == nil {
+				if logPayload.Payload != nil {
+					var payloadStr string
+					switch p := logPayload.Payload.(type) {
+					case string:
+						payloadStr = p
+					default:
+						bytesVal, err := json.Marshal(p)
+						if err == nil {
+							payloadStr = string(bytesVal)
+						}
+					}
+					if len(payloadStr) > 2 { // >2 to exclude empty string or empty JSON "{}"
+						return payloadStr, nil
+					}
+				}
+			}
 		}
 	}
 
-	if payloadStr == "" {
-		return "", fmt.Errorf("compliance log payload field is empty")
-	}
-
-	return payloadStr, nil
+	return "", fmt.Errorf("no valid quarantined payload found")
 }
 
 func handleMinIOListBuckets(w http.ResponseWriter, r *http.Request) {
@@ -3077,6 +3532,62 @@ func handleMinIOListObjects(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	prefix := r.URL.Query().Get("prefix")
+	limitStr := r.URL.Query().Get("limit")
+	limit := 100
+	if limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil {
+			limit = l
+		}
+	}
+
+	if GatewayConfig.ComplianceLoggingProvider == "none" {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte("[]"))
+		return
+	}
+
+	if GatewayConfig.ComplianceLoggingProvider == "local" {
+		type objectInfo struct {
+			Key          string    `json:"key"`
+			Size         int64     `json:"size"`
+			LastModified time.Time `json:"last_modified"`
+		}
+		objects := make([]objectInfo, 0)
+
+		localPath := filepath.Join("/app/data/compliance_logs", prefix)
+		entries, err := os.ReadDir(localPath)
+		if err == nil {
+			for _, entry := range entries {
+				if entry.Type().IsRegular() {
+					info, err := entry.Info()
+					if err == nil {
+						key := filepath.Join(prefix, entry.Name())
+						key = strings.ReplaceAll(key, "\\", "/")
+
+						objects = append(objects, objectInfo{
+							Key:          key,
+							Size:         info.Size(),
+							LastModified: info.ModTime(),
+						})
+					}
+				}
+			}
+		}
+
+		sort.Slice(objects, func(i, j int) bool {
+			return objects[i].LastModified.After(objects[j].LastModified)
+		})
+
+		if len(objects) > limit {
+			objects = objects[:limit]
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(objects)
+		return
+	}
+
 	if minioClient == nil {
 		http.Error(w, "MinIO is not configured", http.StatusInternalServerError)
 		return
@@ -3091,6 +3602,7 @@ func handleMinIOListObjects(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	objectCh := minioClient.ListObjects(ctx, bucket, minio.ListObjectsOptions{
+		Prefix:    prefix,
 		Recursive: true,
 	})
 
@@ -3111,6 +3623,19 @@ func handleMinIOListObjects(w http.ResponseWriter, r *http.Request) {
 			Size:         obj.Size,
 			LastModified: obj.LastModified,
 		})
+		if len(objects) >= limit {
+			break
+		}
+	}
+
+	// Sort objects by LastModified descending to show newest first
+	sort.Slice(objects, func(i, j int) bool {
+		return objects[i].LastModified.After(objects[j].LastModified)
+	})
+
+	// Slice array to respect the limit
+	if len(objects) > limit {
+		objects = objects[:limit]
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -3122,14 +3647,37 @@ func handleMinIOGetObjectContent(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	key := r.URL.Query().Get("key")
+	if key == "" {
+		http.Error(w, "Missing 'key' parameter", http.StatusBadRequest)
+		return
+	}
+
+	if GatewayConfig.ComplianceLoggingProvider == "none" {
+		http.Error(w, "File Not Found", http.StatusNotFound)
+		return
+	}
+
+	if GatewayConfig.ComplianceLoggingProvider == "local" {
+		filePath := filepath.Join("/app/data/compliance_logs", key)
+		fileData, err := os.ReadFile(filePath)
+		if err != nil {
+			http.Error(w, "File Not Found", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(fileData)))
+		w.Write(fileData)
+		return
+	}
+
 	if minioClient == nil {
 		http.Error(w, "MinIO is not configured", http.StatusInternalServerError)
 		return
 	}
 	bucket := r.URL.Query().Get("bucket")
-	key := r.URL.Query().Get("key")
-	if bucket == "" || key == "" {
-		http.Error(w, "Missing 'bucket' or 'key' parameter", http.StatusBadRequest)
+	if bucket == "" {
+		http.Error(w, "Missing 'bucket' parameter", http.StatusBadRequest)
 		return
 	}
 
@@ -3447,25 +3995,46 @@ func handleAPITransactionDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 1. Primary: Try to fetch from MinIO datalake (contains complete AuditLogPayload)
-	if minioClient != nil && minioBucket != "" {
-		if dateStr == "" {
-			dateStr = time.Now().Format("2006-01-02")
-		}
-		objectName := fmt.Sprintf("audit/%s/%s.json", dateStr, txID)
-		
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
+	if dateStr == "" {
+		dateStr = time.Now().Format("2006-01-02")
+	}
 
-		obj, err := minioClient.GetObject(ctx, minioBucket, objectName, minio.GetObjectOptions{})
-		if err == nil {
-			defer obj.Close()
-			_, err = obj.Stat()
-			if err == nil {
+	// 1. Primary: Try to fetch from Local logs or MinIO datalake
+	if GatewayConfig.ComplianceLoggingProvider == "local" {
+		objectNames := []string{
+			fmt.Sprintf("%s.json", txID),
+			fmt.Sprintf("blocked_%s.json", txID),
+		}
+		for _, name := range objectNames {
+			filePath := filepath.Join("/app/data/compliance_logs/audit", dateStr, name)
+			if fileData, err := os.ReadFile(filePath); err == nil {
 				w.Header().Set("Content-Type", "application/json")
-				_, _ = io.Copy(w, obj)
+				w.Write(fileData)
 				return
 			}
+		}
+	} else if minioClient != nil && minioBucket != "" {
+		
+		objectNames := []string{
+			fmt.Sprintf("audit/%s/%s.json", dateStr, txID),
+			fmt.Sprintf("audit/%s/blocked_%s.json", dateStr, txID),
+		}
+		
+		for _, name := range objectNames {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			obj, err := minioClient.GetObject(ctx, minioBucket, name, minio.GetObjectOptions{})
+			if err == nil {
+				_, statErr := obj.Stat()
+				if statErr == nil {
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = io.Copy(w, obj)
+					obj.Close()
+					cancel()
+					return
+				}
+				obj.Close()
+			}
+			cancel()
 		}
 	}
 
@@ -3533,5 +4102,11 @@ func handleAPITransactionDetail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.Error(w, "Transaction log not found in datalake or cache database", http.StatusNotFound)
+}
+
+func getRedactedBodyForBlock(body []byte) []byte {
+	triggerNLP := GatewayConfig.DLPProvider == "presidio"
+	redacted, _ := RedactPII(body, triggerNLP)
+	return redacted
 }
 

@@ -147,8 +147,8 @@ func GetSessionState(sessionID string) (*ActiveInfState, bool) {
 	return nil, false
 }
 
-// StoreSessionState saves the state to both sessionCache and Redis
-func StoreSessionState(sessionID string, state *ActiveInfState) {
+// storeSessionStateUnsafe saves the state to both sessionCache and Redis WITHOUT locking (caller must hold state lock)
+func storeSessionStateUnsafe(sessionID string, state *ActiveInfState) {
 	sessionCache.Store(sessionID, state)
 	if redisClient != nil {
 		data, err := json.Marshal(state)
@@ -159,6 +159,13 @@ func StoreSessionState(sessionID string, state *ActiveInfState) {
 			})
 		}
 	}
+}
+
+// StoreSessionState saves the state to both sessionCache and Redis (safely acquires lock for serialization)
+func StoreSessionState(sessionID string, state *ActiveInfState) {
+	state.Lock()
+	defer state.Unlock()
+	storeSessionStateUnsafe(sessionID, state)
 }
 
 // DeleteSessionState removes the state from both sessionCache and Redis
@@ -231,7 +238,7 @@ func subscribeActiveInferenceReloads() {
 			}
 			state.UpdateL2State(req.L2Beliefs, req.L2Action)
 			state.HistoryL3VFE = append(state.HistoryL3VFE, req.L3VFE)
-			StoreSessionState(uuidStr, state)
+			storeSessionStateUnsafe(uuidStr, state)
 			state.Unlock()
 		}
 	}

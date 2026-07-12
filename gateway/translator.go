@@ -38,9 +38,19 @@ type OpenAIChoice struct {
 }
 
 type OpenAIUsage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
+	PromptTokens            int                      `json:"prompt_tokens"`
+	CompletionTokens        int                      `json:"completion_tokens"`
+	TotalTokens             int                      `json:"total_tokens"`
+	PromptTokensDetails     *OpenAIPromptDetails     `json:"prompt_tokens_details,omitempty"`
+	CompletionTokensDetails *OpenAICompletionDetails `json:"completion_tokens_details,omitempty"`
+}
+
+type OpenAIPromptDetails struct {
+	CachedTokens int `json:"cached_tokens"`
+}
+
+type OpenAICompletionDetails struct {
+	ReasoningTokens int `json:"reasoning_tokens"`
 }
 
 // GeminiRequest structure
@@ -105,8 +115,10 @@ type ClaudeResponse struct {
 	Model      string `json:"model"`
 	StopReason string `json:"stop_reason"`
 	Usage      struct {
-		InputTokens  int `json:"input_tokens"`
-		OutputTokens int `json:"output_tokens"`
+		InputTokens              int `json:"input_tokens"`
+		OutputTokens             int `json:"output_tokens"`
+		CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
+		CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
 	} `json:"usage"`
 }
 
@@ -246,6 +258,13 @@ func TranslateResponse(provider, targetModel string, nativeBytes []byte) ([]byte
 			responseText = claudeResp.Content[0].Text
 		}
 
+		var promptDetails *OpenAIPromptDetails
+		if claudeResp.Usage.CacheReadInputTokens > 0 {
+			promptDetails = &OpenAIPromptDetails{
+				CachedTokens: claudeResp.Usage.CacheReadInputTokens,
+			}
+		}
+
 		openAIResp := OpenAIResponse{
 			ID:      claudeResp.ID,
 			Object:  "chat.completion",
@@ -262,9 +281,10 @@ func TranslateResponse(provider, targetModel string, nativeBytes []byte) ([]byte
 				},
 			},
 			Usage: OpenAIUsage{
-				PromptTokens:     claudeResp.Usage.InputTokens,
-				CompletionTokens: claudeResp.Usage.OutputTokens,
-				TotalTokens:      claudeResp.Usage.InputTokens + claudeResp.Usage.OutputTokens,
+				PromptTokens:        claudeResp.Usage.InputTokens,
+				CompletionTokens:    claudeResp.Usage.OutputTokens,
+				TotalTokens:         claudeResp.Usage.InputTokens + claudeResp.Usage.OutputTokens,
+				PromptTokensDetails: promptDetails,
 			},
 		}
 		return json.Marshal(openAIResp)

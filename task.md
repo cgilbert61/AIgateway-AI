@@ -1,6 +1,8 @@
 - [x] Update PostgreSQL schema with quarantine status and SIEM configuration table
 - [x] Add G1163RT Quarantine database helper functions in `gateway/db.go`
 - [x] Integrate quarantine check and HTTP 403 response in `handleChatCompletions` and `handleAgentAction`
+- [x] Update JSON Configuration (`config/default_matrices.json`) with a 4th action column
+- [/] Update Active Inference engine Go code (`gateway/active_engine.go`) with new constants, matrix slices, and normalize limits
 - [x] Add API endpoints for SIEM config (`/api/siem/config`), Quarantine list (`/api/quarantine/list`), and Quarantine actions (`/api/quarantine/action`)
 - [x] Design and build G1163RT Quarantine Workspace UI and SIEM Integrations menu in `gateway/dashboard/index.html` and `gateway/dashboard/config.html`
 - [x] Add manual verification tests in `test_gateway.py` to assert quarantine block and release behaviors

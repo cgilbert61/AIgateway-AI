@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -161,6 +162,47 @@ func InitDB() {
 						auth_token VARCHAR(255) NOT NULL,
 						is_active BOOLEAN DEFAULT FALSE
 					)
+				`)
+				_, _ = DB.Exec(`
+					CREATE TABLE IF NOT EXISTS model_pricing (
+						model_name VARCHAR(255) PRIMARY KEY,
+						provider VARCHAR(50) NOT NULL,
+						input_price_per_million NUMERIC(10, 4) NOT NULL,
+						output_price_per_million NUMERIC(10, 4) NOT NULL,
+						cached_input_price_per_million NUMERIC(10, 4) NOT NULL,
+						reasoning_price_per_million NUMERIC(10, 4) NOT NULL,
+						updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+					)
+				`)
+				_, _ = DB.Exec(`
+					CREATE TABLE IF NOT EXISTS token_cost_ledger (
+						transaction_id UUID PRIMARY KEY,
+						session_id UUID NOT NULL,
+						model_name VARCHAR(255) NOT NULL,
+						virtual_api_key VARCHAR(255) DEFAULT 'default_key',
+						department VARCHAR(255) DEFAULT 'unassigned',
+						end_user_id VARCHAR(255) DEFAULT 'anonymous',
+						prompt_tokens INT DEFAULT 0,
+						completion_tokens INT DEFAULT 0,
+						cached_prompt_tokens INT DEFAULT 0,
+						reasoning_tokens INT DEFAULT 0,
+						calculated_cost NUMERIC(15, 6) DEFAULT 0.0,
+						timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+					)
+				`)
+				_, _ = DB.Exec("CREATE INDEX IF NOT EXISTS idx_cost_ledger_dept ON token_cost_ledger (department)")
+				_, _ = DB.Exec("CREATE INDEX IF NOT EXISTS idx_cost_ledger_user ON token_cost_ledger (end_user_id)")
+				_, _ = DB.Exec("CREATE INDEX IF NOT EXISTS idx_cost_ledger_key ON token_cost_ledger (virtual_api_key)")
+				_, _ = DB.Exec("CREATE INDEX IF NOT EXISTS idx_cost_ledger_timestamp ON token_cost_ledger (timestamp)")
+
+				_, _ = DB.Exec(`
+					INSERT INTO model_pricing (model_name, provider, input_price_per_million, output_price_per_million, cached_input_price_per_million, reasoning_price_per_million) VALUES
+					('mock-model', 'mock', 5.0, 15.0, 2.5, 15.0),
+					('gpt-4o', 'openai', 5.0, 15.0, 2.5, 15.0),
+					('gpt-4o-mini', 'openai', 0.15, 0.60, 0.075, 0.60),
+					('claude-3-5-sonnet', 'anthropic', 3.0, 15.0, 0.30, 15.0),
+					('gemini-1.5-pro', 'gemini', 1.25, 5.0, 0.625, 5.0)
+					ON CONFLICT (model_name) DO NOTHING
 				`)
 				break
 			}
@@ -759,6 +801,123 @@ func SaveSIEMConfig(cfg *SIEMConfig) error {
 		ON CONFLICT (provider) DO UPDATE SET endpoint_url = $2, auth_token = $3, is_active = $4
 	`, cfg.Provider, cfg.EndpointURL, cfg.AuthToken, cfg.IsActive)
 	return err
+}
+
+func QueueTokenCostCalculation(txID string, sessionID string, r *http.Request, rehydratedResp []byte) {
+	if DB == nil {
+		return
+	}
+
+	// Parse headers
+	virtualKey := r.Header.Get("X-Virtual-API-Key")
+	if virtualKey == "" {
+		virtualKey = "default_key"
+	}
+	department := r.Header.Get("X-Department")
+	if department == "" {
+		department = r.Header.Get("X-Cost-Center")
+	}
+	if department == "" {
+		department = "unassigned"
+	}
+	endUserID := r.Header.Get("X-End-User-ID")
+	if endUserID == "" {
+		endUserID = "anonymous"
+	}
+
+	// Parse response
+	var respObj OpenAIResponse
+	if err := json.Unmarshal(rehydratedResp, &respObj); err != nil {
+		log.Printf("[Costing Error] Failed to parse completion response for cost tracking: %v", err)
+		return
+	}
+
+	modelName := respObj.Model
+	if modelName == "" {
+		modelName = "mock-model"
+	}
+
+	promptTokens := respObj.Usage.PromptTokens
+	completionTokens := respObj.Usage.CompletionTokens
+	cachedTokens := 0
+	if respObj.Usage.PromptTokensDetails != nil {
+		cachedTokens = respObj.Usage.PromptTokensDetails.CachedTokens
+	}
+	reasoningTokens := 0
+	if respObj.Usage.CompletionTokensDetails != nil {
+		reasoningTokens = respObj.Usage.CompletionTokensDetails.ReasoningTokens
+	}
+
+	// Queue the database operation asynchronously to protect transaction latency
+	queueDBTask(func() {
+		var provider string
+		var inputRate, outputRate, cachedRate, reasoningRate float64
+
+		err := DB.QueryRow(`
+			SELECT provider, input_price_per_million, output_price_per_million, cached_input_price_per_million, reasoning_price_per_million 
+			FROM model_pricing 
+			WHERE model_name = $1
+		`, modelName).Scan(&provider, &inputRate, &outputRate, &cachedRate, &reasoningRate)
+
+		if err != nil {
+			log.Printf("[Costing Warning] Model '%s' not found in pricing index. Falling back to default mock-model rates.", modelName)
+			err = DB.QueryRow(`
+				SELECT provider, input_price_per_million, output_price_per_million, cached_input_price_per_million, reasoning_price_per_million 
+				FROM model_pricing 
+				WHERE model_name = 'mock-model'
+			`).Scan(&provider, &inputRate, &outputRate, &cachedRate, &reasoningRate)
+			if err != nil {
+				// absolute emergency fallback
+				inputRate = 5.0
+				outputRate = 15.0
+				cachedRate = 2.5
+				reasoningRate = 15.0
+			}
+		}
+
+		activeInput := float64(promptTokens - cachedTokens)
+		if activeInput < 0 {
+			activeInput = 0
+		}
+		activeOutput := float64(completionTokens - reasoningTokens)
+		if activeOutput < 0 {
+			activeOutput = 0
+		}
+
+		cost := (activeInput*inputRate + float64(cachedTokens)*cachedRate + activeOutput*outputRate + float64(reasoningTokens)*reasoningRate) / 1000000.0
+
+		// Try resolving transaction UUID
+		var txUUID uuid.UUID
+		if txID != "" {
+			var parseErr error
+			txUUID, parseErr = uuid.Parse(txID)
+			if parseErr != nil {
+				txUUID = uuid.New()
+			}
+		} else {
+			txUUID = uuid.New()
+		}
+
+		var sessUUID uuid.UUID
+		if sessionID != "" {
+			var parseErr error
+			sessUUID, parseErr = uuid.Parse(sessionID)
+			if parseErr != nil {
+				sessUUID = uuid.New()
+			}
+		} else {
+			sessUUID = uuid.New()
+		}
+
+		_, insertErr := DB.Exec(`
+			INSERT INTO token_cost_ledger (transaction_id, session_id, model_name, virtual_api_key, department, end_user_id, prompt_tokens, completion_tokens, cached_prompt_tokens, reasoning_tokens, calculated_cost)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		`, txUUID, sessUUID, modelName, virtualKey, department, endUserID, promptTokens, completionTokens, cachedTokens, reasoningTokens, cost)
+
+		if insertErr != nil {
+			log.Printf("[Costing Error] Failed to write token cost log to ledger: %v", insertErr)
+		}
+	})
 }
 
 

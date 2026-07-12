@@ -438,6 +438,7 @@
                     <div class="form-group">
                         <label class="form-label">DLP Provider</label>
                         <select id="dlp-provider" class="form-select">
+                            <option value="presidio">presidio (NLP Sidecar)</option>
                             <option value="symantec">symantec</option>
                             <option value="cyberhaven">cyberhaven</option>
                             <option value="microsoft">microsoft</option>
@@ -452,6 +453,62 @@
                     <div class="form-group full-width">
                         <label class="form-label">DLP API Key / Token</label>
                         <input type="password" id="dlp-key" class="form-input" placeholder="Masked credentials">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Compliance Logging Provider</label>
+                        <select id="compliance-logging-provider" class="form-select">
+                            <option value="s3">S3 / MinIO (Enterprise Compliance Datalake)</option>
+                            <option value="local">Local Folder (Fast Local JSON Files)</option>
+                            <option value="none">none (Bypass compliance archiving for peak throughput)</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="display:flex; align-items:center; gap:8px; margin-top:10px;">
+                        <input type="checkbox" id="minio-object-locking" style="width:18px; height:18px; cursor:pointer;">
+                        <label for="minio-object-locking" style="font-size:12px; font-weight:600; cursor:pointer; color:var(--text-muted);">Enable Datalake WORM Compliance (Object Locking)</label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Part 2.5: Presidio NLP Redaction Filters -->
+            <div>
+                <div class="card-title">
+                    <span>Presidio NLP Entity Filtering</span>
+                    <span class="section-tag tag-cyan">PII REDACTION RULE BUILDER</span>
+                </div>
+                <div style="background: rgba(30,41,59,0.15); border: 1px solid var(--border-color); padding: 16px; border-radius: 8px; display: flex; flex-direction: column; gap: 12px;">
+                    <div style="font-size: 11px; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">Standard Redaction Entities</div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 10px;">
+                        <label style="display:flex; align-items:center; gap:6px; font-size:11px; cursor:pointer;">
+                            <input type="checkbox" class="presidio-entity-cb" value="PERSON" style="cursor:pointer;"> Person
+                        </label>
+                        <label style="display:flex; align-items:center; gap:6px; font-size:11px; cursor:pointer;">
+                            <input type="checkbox" class="presidio-entity-cb" value="LOCATION" style="cursor:pointer;"> Location
+                        </label>
+                        <label style="display:flex; align-items:center; gap:6px; font-size:11px; cursor:pointer;">
+                            <input type="checkbox" class="presidio-entity-cb" value="ORGANIZATION" style="cursor:pointer;"> Organization
+                        </label>
+                        <label style="display:flex; align-items:center; gap:6px; font-size:11px; cursor:pointer;">
+                            <input type="checkbox" class="presidio-entity-cb" value="DATE_TIME" style="cursor:pointer;"> Date/Time
+                        </label>
+                        <label style="display:flex; align-items:center; gap:6px; font-size:11px; cursor:pointer;">
+                            <input type="checkbox" class="presidio-entity-cb" value="EMAIL_ADDRESS" style="cursor:pointer;"> Email Address
+                        </label>
+                        <label style="display:flex; align-items:center; gap:6px; font-size:11px; cursor:pointer;">
+                            <input type="checkbox" class="presidio-entity-cb" value="PHONE_NUMBER" style="cursor:pointer;"> Phone Number
+                        </label>
+                        <label style="display:flex; align-items:center; gap:6px; font-size:11px; cursor:pointer;">
+                            <input type="checkbox" class="presidio-entity-cb" value="CREDIT_CARD" style="cursor:pointer;"> Credit Card
+                        </label>
+                        <label style="display:flex; align-items:center; gap:6px; font-size:11px; cursor:pointer;">
+                            <input type="checkbox" class="presidio-entity-cb" value="US_SSN" style="cursor:pointer;"> US SSN
+                        </label>
+                    </div>
+                    <div class="form-group" style="margin-top: 10px;">
+                        <label class="form-label" style="font-size: 11px;">Custom NLP Entities (Comma-separated)</label>
+                        <input type="text" id="presidio-custom-entities" class="form-input" placeholder="e.g. IP_ADDRESS, US_PASSPORT, US_DRIVER_LICENSE, US_BANK_NUMBER">
+                        <div style="font-size: 10px; color: var(--text-muted); margin-top: 4px; line-height: 1.4;">
+                            <strong>Note:</strong> Custom entities must match model-supported recognizers. Common examples: <code>IP_ADDRESS</code>, <code>US_PASSPORT</code>, <code>US_DRIVER_LICENSE</code>, or <code>US_BANK_NUMBER</code>.
+                        </div>
                     </div>
                 </div>
             </div>
@@ -737,6 +794,7 @@
             const sliders = [
                 "l1-safe", "l1-susp", "l1-mal",
                 "l2-decay", "l2-precision", "l3-precision",
+                "l4-threat-slider",
                 "dup-window", "dup-limit"
             ];
             sliders.forEach(id => {
@@ -746,6 +804,32 @@
                         saveSystemConfiguration();
                     });
                 }
+            });
+
+            // Auto-save form fields (selects, checkboxes, text fields on change/blur)
+            const autoSaveSelectors = [
+                "#llm-provider", "#llm-model", "#llm-url", "#llm-key",
+                "#dlp-provider", "#dlp-url", "#dlp-key",
+                "#compliance-logging-provider", "#minio-object-locking",
+                "#presidio-custom-entities",
+                "#aws-region", "#aws-key", "#aws-secret",
+                "#azure-sub", "#azure-tenant", "#azure-client", "#azure-secret",
+                "#gcp-project", "#gcp-key"
+            ];
+            autoSaveSelectors.forEach(selector => {
+                const el = document.querySelector(selector);
+                if (el) {
+                    el.addEventListener("change", () => {
+                        saveSystemConfiguration();
+                    });
+                }
+            });
+
+            // Auto-save for standard entity checkboxes
+            document.querySelectorAll(".presidio-entity-cb").forEach(cb => {
+                cb.addEventListener("change", () => {
+                    saveSystemConfiguration();
+                });
             });
         };
 
@@ -831,6 +915,27 @@
                 document.getElementById("dlp-provider").value = status.dlp_provider || "none";
                 document.getElementById("dlp-url").value = status.dlp_endpoint || "";
                 document.getElementById("dlp-key").value = status.dlp_api_key || "";
+                document.getElementById("compliance-logging-provider").value = status.compliance_logging_provider || "s3";
+                document.getElementById("minio-object-locking").checked = status.minio_object_locking || false;
+
+                // Presidio NLP rule builder load
+                const configuredEntitiesStr = status.dlp_presidio_entities || "PERSON,LOCATION,ORGANIZATION,DATE_TIME,EMAIL_ADDRESS,PHONE_NUMBER,CREDIT_CARD,US_SSN";
+                const configuredEntities = configuredEntitiesStr.split(',').map(e => e.trim());
+                const standardEntities = ["PERSON", "LOCATION", "ORGANIZATION", "DATE_TIME", "EMAIL_ADDRESS", "PHONE_NUMBER", "CREDIT_CARD", "US_SSN"];
+                const customEntitiesList = [];
+                
+                document.querySelectorAll(".presidio-entity-cb").forEach(cb => cb.checked = false);
+
+                configuredEntities.forEach(ent => {
+                    if (standardEntities.includes(ent)) {
+                        const cb = document.querySelector(`.presidio-entity-cb[value="${ent}"]`);
+                        if (cb) cb.checked = true;
+                    } else if (ent !== "") {
+                        customEntitiesList.push(ent);
+                    }
+                });
+
+                document.getElementById("presidio-custom-entities").value = customEntitiesList.join(", ");
 
                 // AWS
                 document.getElementById("aws-region").value = status.cloud_aws_region || "";
@@ -953,8 +1058,22 @@
             }
         }
 
-        // Save entire configuration to backend
         async function saveSystemConfiguration() {
+            const selectedEntities = [];
+            document.querySelectorAll(".presidio-entity-cb:checked").forEach(cb => {
+                selectedEntities.push(cb.value);
+            });
+            const customEntsText = document.getElementById("presidio-custom-entities").value;
+            if (customEntsText) {
+                customEntsText.split(',').forEach(ent => {
+                    const trimmed = ent.trim();
+                    if (trimmed && !selectedEntities.includes(trimmed)) {
+                        selectedEntities.push(trimmed);
+                    }
+                });
+            }
+            const presidioEntitiesString = selectedEntities.length > 0 ? selectedEntities.join(",") : "none";
+
             const payload = {
                 provider: document.getElementById("llm-provider").value,
                 default_model: document.getElementById("llm-model").value,
@@ -964,6 +1083,9 @@
                 dlp_provider: document.getElementById("dlp-provider").value,
                 dlp_endpoint: document.getElementById("dlp-url").value,
                 dlp_api_key: document.getElementById("dlp-key").value,
+                minio_object_locking: document.getElementById("minio-object-locking").checked,
+                compliance_logging_provider: document.getElementById("compliance-logging-provider").value,
+                dlp_presidio_entities: presidioEntitiesString,
 
                 cloud_aws_region: document.getElementById("aws-region").value,
                 cloud_aws_access_key: document.getElementById("aws-key").value,
@@ -1087,6 +1209,11 @@
             const dupLSlider = document.getElementById("dup-limit");
             dupLSlider.value = 2;
             dupLSlider.dispatchEvent(new Event('input'));
+
+            // L4 Threat default
+            const threatSlider = document.getElementById("l4-threat-slider");
+            threatSlider.value = 2; // Balanced
+            updateL4ThreatDisplay(2);
 
             // Save immediately
             await saveSystemConfiguration();

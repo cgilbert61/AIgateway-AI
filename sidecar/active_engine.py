@@ -19,7 +19,7 @@ class Layer2Engine:
 
         # Column normalize B2 for each action: [state_next][state_prev][action]
         self.B2 = np.array(raw_b2, dtype=float)
-        for act in range(3):
+        for act in range(self.B2.shape[2]):
             col_sums = self.B2[:, :, act].sum(axis=0)
             self.B2[:, :, act] = self.B2[:, :, act] / (col_sums + 1e-16)
 
@@ -138,7 +138,7 @@ class Layer2Engine:
         # A1 normalization
         a1 = a1 / (a1.sum(axis=0) + 1e-16)
         # B1 normalization
-        for act in range(3):
+        for act in range(b1.shape[2]):
             col_sums = b1[:, :, act].sum(axis=0)
             b1[:, :, act] = b1[:, :, act] / (col_sums + 1e-16)
 

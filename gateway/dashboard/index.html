@@ -783,16 +783,19 @@
             <button class="btn" onclick="generateSecurityReport()" style="border-color: rgba(217, 70, 239, 0.6); color: rgb(217, 70, 239); height: 32px; font-size: 11px; padding: 4px 10px; margin-left: 10px;">
                 <span>🐘 L4 Audit Report</span>
             </button>
-            <a href="/flow.html" id="flow-link" class="btn" style="border-color: var(--color-magenta); color: var(--color-magenta); height: 32px; font-size: 11px; padding: 4px 10px; margin-left: 10px; text-decoration: none; display: inline-flex; align-items: center;">
+            <a href="/flow.html" id="flow-link" class="btn" target="_blank" style="border-color: var(--color-magenta); color: var(--color-magenta); height: 32px; font-size: 11px; padding: 4px 10px; margin-left: 10px; text-decoration: none; display: inline-flex; align-items: center;">
                 <span>🔍 Visual Flow Walkthrough</span>
             </a>
-            <a href="/playground.html" id="playground-link" class="btn" style="border-color: #a855f7; color: #c084fc; height: 32px; font-size: 11px; padding: 4px 10px; margin-left: 10px; text-decoration: none; display: inline-flex; align-items: center;">
+            <a href="/playground.html" id="playground-link" class="btn" target="_blank" style="border-color: #a855f7; color: #c084fc; height: 32px; font-size: 11px; padding: 4px 10px; margin-left: 10px; text-decoration: none; display: inline-flex; align-items: center;">
                 <span>🛠️ OPA Playground</span>
             </a>
-            <a href="#" id="quarantine-link" class="btn" style="border-color: #fbbf24; color: #fbbf24; height: 32px; font-size: 11px; padding: 4px 10px; margin-left: 10px; text-decoration: none; display: inline-flex; align-items: center;">
+            <a href="#" id="quarantine-link" class="btn" target="_blank" style="border-color: #fbbf24; color: #fbbf24; height: 32px; font-size: 11px; padding: 4px 10px; margin-left: 10px; text-decoration: none; display: inline-flex; align-items: center;">
                 <span>⚠️ Quarantine Workspace</span>
             </a>
-            <a href="#" id="config-link" class="btn" style="border-color: var(--color-cyan); color: var(--color-cyan); height: 32px; font-size: 11px; padding: 4px 10px; margin-left: 10px; text-decoration: none; display: inline-flex; align-items: center;">
+            <a href="/costing.html" id="costing-link" class="btn" target="_blank" style="border-color: #10b981; color: #34d399; height: 32px; font-size: 11px; padding: 4px 10px; margin-left: 10px; text-decoration: none; display: inline-flex; align-items: center;">
+                <span>💰 Cost Governance</span>
+            </a>
+            <a href="#" id="config-link" class="btn" target="_blank" style="border-color: var(--color-cyan); color: var(--color-cyan); height: 32px; font-size: 11px; padding: 4px 10px; margin-left: 10px; text-decoration: none; display: inline-flex; align-items: center;">
                 <span>⚙️ Configure System</span>
             </a>
         </div>
@@ -818,10 +821,10 @@
                     </div>
                 </div>
 
-                <!-- L4 Threat Escalation Mode Slider -->
+                <!-- Active Inference Threat Level Slider -->
                 <div style="margin-top: 12px; margin-bottom: 15px; padding-bottom: 12px; border-bottom: 1px solid var(--border-color);">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 6px;">
-                        <span style="font-size: 11px; font-weight:700; color: var(--color-cyan);">Layer 4: Active Inference Threat Level</span>
+                        <span style="font-size: 11px; font-weight:700; color: var(--color-cyan);">Active Inference Threat Level</span>
                         <span id="l4-threat-display" style="font-size: 11px; font-weight:700; color: var(--color-cyan);">Medium / Balanced</span>
                     </div>
                     <input type="range" id="l4-threat-slider" min="1" max="4" step="1" value="2" class="slider-input" onmousedown="isDraggingTheta = true" ontouchstart="isDraggingTheta = true" onchange="isDraggingTheta = false; applyL4ThreatThreshold(this.value);" oninput="isDraggingTheta = true; updateL4ThreatDisplay(this.value);" style="width: 100%; margin-bottom: 6px; cursor: pointer; accent-color: var(--color-cyan);">
@@ -1034,6 +1037,7 @@
                     <button class="tab-btn" id="tab-btn-xai" onclick="switchTab('xai')">XAI Diagnostics</button>
                     <button class="tab-btn" id="tab-btn-health" onclick="switchTab('health')">System Backend Health</button>
                     <button class="tab-btn" id="tab-btn-forensics" onclick="switchTab('forensics')">Agent Forensics</button>
+                    <button class="tab-btn" id="tab-btn-compliance" onclick="switchTab('compliance')">S3 Compliance Audits</button>
                 </div>
 
                 <!-- Tab 1: Matrices -->
@@ -1211,6 +1215,43 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- Tab 6: S3 Compliance Audits -->
+                <div class="tab-content-panel" id="tab-content-compliance" style="overflow-y: auto;">
+                    <div style="padding: 16px;">
+                        <div style="font-weight: 700; font-size: 14px; margin-bottom: 12px; color: var(--color-cyan); display:flex; justify-content:space-between; align-items:center;">
+                            <span>S3 Datalake Compliance Audits</span>
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <label style="font-size:11px; color:var(--text-muted);">Filter Date:</label>
+                                <input type="date" id="compliance-date-filter" style="background:#090d16; border:1px solid var(--border-color); border-radius:4px; padding:3px 6px; color:#fff; font-size:11px; font-family:sans-serif;" onchange="loadComplianceS3Logs(0)">
+                                <button class="btn" onclick="loadComplianceS3Logs(0)" style="margin:0; padding:3px 8px; font-size:11px;">Refresh</button>
+                            </div>
+                        </div>
+                        <div style="border: 1px solid var(--border-color); border-radius: 6px; overflow: hidden; background: rgba(0,0,0,0.25); min-height: 250px;">
+                            <table style="width: 100%; border-collapse: collapse; font-size: 12px; text-align: left;">
+                                <thead>
+                                    <tr style="border-bottom: 1px solid rgba(255,255,255,0.05); color: var(--text-muted); font-weight: 600; background: rgba(20,24,33,0.5);">
+                                        <th style="padding: 10px 16px;">Log File (Transaction ID)</th>
+                                        <th style="padding: 10px 16px; width: 120px;">Status</th>
+                                        <th style="padding: 10px 16px; width: 100px;">Size</th>
+                                        <th style="padding: 10px 16px; width: 180px;">Archived Date</th>
+                                        <th style="padding: 10px 16px; text-align: center; width: 120px;">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="compliance-tbody">
+                                    <!-- Populated dynamically by loadComplianceS3Logs -->
+                                </tbody>
+                            </table>
+                        </div>
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:12px;">
+                            <span style="font-size:11px; color:var(--text-muted);" id="compliance-paging-info">Showing logs for selected day</span>
+                            <div style="display:flex; gap:8px;">
+                                <button class="btn" id="compliance-prev-btn" onclick="loadComplianceS3Logs(-1)" style="margin:0; padding:4px 10px; font-size:11px;" disabled>Previous</button>
+                                <button class="btn" id="compliance-next-btn" onclick="loadComplianceS3Logs(1)" style="margin:0; padding:4px 10px; font-size:11px;" disabled>Next</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -1229,6 +1270,7 @@
         let activeSessionId = "";
         let selectedTxId = "";
         let logsList = [];
+        let unfilteredLogsList = [];
         let sessionPayloadsMap = {}; // tx_id -> payload detail
         let pollingInterval = null;
         let isDraggingTheta = false;
@@ -1256,6 +1298,8 @@
 
             if (tab === "forensics") {
                 loadForensicsData();
+            } else if (tab === "compliance") {
+                loadComplianceS3Logs(0);
             }
         }
 
@@ -1279,6 +1323,7 @@
                 const r = await fetch("/api/logs");
                 if(!r.ok) return;
                 const logs = await r.json();
+                unfilteredLogsList = logs;
                 const filteredLogs = logs.filter(l => l.session_id && !l.session_id.startsWith("sim-worker-"));
                 logsList = filteredLogs;
                 window.logsList = filteredLogs;
@@ -1289,6 +1334,9 @@
                     currentSelection = "auto";
                 }
                 const sessions = [...new Set(logs.map(l => l.session_id))];
+                if (activeSessionId && activeSessionId !== "auto" && !sessions.includes(activeSessionId)) {
+                    sessions.push(activeSessionId);
+                }
                 
                 sessionSelect.innerHTML = `<option value="auto">Auto-Follow Latest Session</option>`;
                 sessions.forEach(sid => {
@@ -1319,14 +1367,15 @@
                         const latestSession = logs[0].session_id;
                         if (activeSessionId !== latestSession) {
                             activeSessionId = latestSession;
-                            fetchSessionDetails(activeSessionId);
+                            selectedTxId = ""; // Clear selected transaction when auto-switching session
+                            fetchSessionDetails(activeSessionId, true);
                         }
                     }
                 }
 
                 if(!activeSessionId && sessions.length > 0) {
                     activeSessionId = sessions[0];
-                    fetchSessionDetails(activeSessionId);
+                    fetchSessionDetails(activeSessionId, true);
                 }
 
                 // Draw global pipeline VFE trend lines (oldest to newest)
@@ -1425,7 +1474,7 @@
                     document.getElementById("session-select").value = activeSessionId;
                     
                     pollLogs(); // Refresh cards active classes
-                    fetchSessionDetails(activeSessionId);
+                    fetchSessionDetails(activeSessionId, true);
                     switchTab('cso');
                 };
 
@@ -1452,7 +1501,7 @@
         }
 
         // Fetch session specific parameters
-        async function fetchSessionDetails(sessionId) {
+        async function fetchSessionDetails(sessionId, forceSliderSync = false) {
             if(!sessionId) return;
             try {
                 const r = await fetch(`/api/session?session_id=${sessionId}`);
@@ -1486,7 +1535,7 @@
                 updateXAIPanel(state);
 
                 // Update theta slider
-                if (state.threshold_theta && !isDraggingTheta) {
+                if (state.threshold_theta && forceSliderSync) {
                     const thetaInput = document.getElementById("theta-threshold-input");
                     if (thetaInput) thetaInput.value = state.threshold_theta;
                     const thetaValDisplay = document.getElementById("theta-val-display");
@@ -1525,31 +1574,61 @@
             document.getElementById("cso-tx-id").innerText = selectedTxId;
             
             // Find observation name in logs list
-            const logEntry = logsList.find(l => l.transaction_id === selectedTxId);
+            const logEntry = unfilteredLogsList.find(l => l.transaction_id === selectedTxId) || logsList.find(l => l.transaction_id === selectedTxId);
             const obsLabels = ["Read", "StructureShift", "InputError", "IngressFlood"];
             const obsIdx = logEntry ? (logEntry.observation_vector && logEntry.observation_vector.length > 0 ? logEntry.observation_vector[0] : 0) : 0;
             document.getElementById("cso-obs-val").innerText = obsLabels[obsIdx] || "Unknown";
 
             const detail = sessionPayloadsMap[selectedTxId];
             if(!detail) {
-                document.getElementById("cso-raw-req").innerText = "No payload recorded for this transaction.";
-                document.getElementById("cso-trans-req").innerText = "No payload recorded for this transaction.";
-                document.getElementById("cso-blocked-message").style.display = "none";
-                document.getElementById("cso-box-trans").style.display = "flex";
-                document.getElementById("cso-trans-header-title").innerText = "Translated Request (Gateway -> Upstream)";
+                const datePart = logEntry && logEntry.timestamp ? logEntry.timestamp.split("T")[0] : new Date().toISOString().split("T")[0];
+                fetch(`/api/transaction/detail?tx_id=${selectedTxId}&date=${datePart}`)
+                    .then(r => {
+                        if (!r.ok) throw new Error("Not found");
+                        return r.json();
+                    })
+                    .then(srvDetail => {
+                        const mapped = {
+                            tx_id: selectedTxId,
+                            raw_request: srvDetail.raw_request || srvDetail.payload,
+                            translated_request: srvDetail.translated_request || srvDetail.translated_payload,
+                            raw_response: srvDetail.raw_response || srvDetail.response,
+                            translated_response: srvDetail.translated_response || srvDetail.rehydrated_resp
+                        };
+                        sessionPayloadsMap[selectedTxId] = mapped;
+                        renderCsoForensics();
+                    })
+                    .catch(err => {
+                        // Cache the empty payload state to prevent infinite fetch loop spam on every poll interval
+                        sessionPayloadsMap[selectedTxId] = {
+                            tx_id: selectedTxId,
+                            raw_request: "No payload recorded for this transaction.",
+                            translated_request: "No payload recorded for this transaction.",
+                            raw_response: "",
+                            translated_response: ""
+                        };
+                        renderCsoForensics();
+                    });
                 return;
             }
 
             const isBlocked = logEntry ? logEntry.is_blocked : false;
 
             if(isBlocked) {
-                let bannerText = "<strong>⚠️ [CSO SECURITY ALERT]</strong> Transaction blocked by Active Inference Engine. Blocked before upstream dispatch.";
+                let bannerText = "<strong>⚠️ [CSO SECURITY ALERT]</strong> Transaction blocked by security policy.";
+                let blockReason = "Blocked before redaction/translation could run.";
+                
                 try {
-                    const parsedResp = JSON.parse(detail.translated_response);
+                    const parsedResp = JSON.parse(detail.translated_response || detail.raw_response);
                     if (parsedResp.blocked_reason) {
                         bannerText = `<strong>⚠️ [CSO SECURITY ALERT]</strong> ${parsedResp.blocked_reason}`;
+                        blockReason = parsedResp.blocked_reason;
+                    } else if (parsedResp.error) {
+                        bannerText = `<strong>⚠️ [CSO SECURITY ALERT]</strong> ${parsedResp.error}`;
+                        blockReason = parsedResp.error;
                     }
                 } catch(e) {}
+                
                 document.getElementById("cso-blocked-message").innerHTML = `<div class="cso-block-banner">${bannerText}</div>`;
                 document.getElementById("cso-blocked-message").style.display = "block";
                 
@@ -1559,11 +1638,19 @@
                 
                 document.getElementById("cso-raw-req").innerText = formatJSON(detail.raw_request);
                 document.getElementById("cso-raw-req").style.color = "#fda4af"; // Reddish text
-
-                document.getElementById("cso-trans-req").innerText = detail.translated_request ? formatJSON(detail.translated_request) : "Blocked before redaction/translation could run.";
+                
+                document.getElementById("cso-trans-req").innerText = detail.translated_request ? formatJSON(detail.translated_request) : `Blocked: ${blockReason}`;
                 document.getElementById("cso-trans-req").style.color = "#a1a1aa"; // Grayish text
             } else {
-                document.getElementById("cso-blocked-message").style.display = "none";
+                const obsIdx = logEntry ? (logEntry.observation_vector && logEntry.observation_vector.length > 0 ? logEntry.observation_vector[0] : 0) : 0;
+                if (obsIdx === 1 || obsIdx === 2) {
+                    let anomalyType = obsIdx === 2 ? "PII/Injection" : "Syntactic drift";
+                    let bannerText = `<strong>ℹ️ [Active Inference Monitor]</strong> Security anomaly (${anomalyType}) detected (VFE: ${logEntry && logEntry.vfe_score ? logEntry.vfe_score.toFixed(4) : "2.90"}). This initial occurrence has been redacted/monitored. Subsequent violations will trigger a session block once VFE exceeds threshold (θ = 3.5).`;
+                    document.getElementById("cso-blocked-message").innerHTML = `<div class="cso-monitor-banner" style="background-color: rgba(59, 130, 246, 0.15); border: 1px solid #3b82f6; color: #93c5fd; padding: 5px 12px; border-radius: 6px; font-size: 0.72rem; line-height: 1.4; margin-bottom: 8px;">${bannerText}</div>`;
+                    document.getElementById("cso-blocked-message").style.display = "block";
+                } else {
+                    document.getElementById("cso-blocked-message").style.display = "none";
+                }
                 document.getElementById("cso-box-trans").style.display = "flex";
                 document.getElementById("cso-trans-header-title").innerText = "Translated Request (Gateway -> Upstream)";
 
@@ -1576,6 +1663,9 @@
         }
 
         function formatJSON(str) {
+            if (typeof str === 'object' && str !== null) {
+                return JSON.stringify(str, null, 2);
+            }
             try {
                 return JSON.stringify(JSON.parse(str), null, 2);
             } catch(e) {
@@ -3314,11 +3404,11 @@
                 activeSessionId = "";
                 if (window.logsList && window.logsList.length > 0) {
                     activeSessionId = window.logsList[0].session_id;
-                    fetchSessionDetails(activeSessionId);
+                    fetchSessionDetails(activeSessionId, true);
                 }
             } else if (val) {
                 activeSessionId = val;
-                fetchSessionDetails(activeSessionId);
+                fetchSessionDetails(activeSessionId, true);
             }
         };
 
@@ -4299,13 +4389,19 @@
                         const i = Math.floor(Math.log(bytes) / Math.log(k));
                         return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
                     };
+
+                    const isAuditBucket = bucket === "compliance-audit-logs";
+                    const buttonLabel = isAuditBucket ? "View Log" : "Load File";
+                    const buttonClickAction = isAuditBucket 
+                        ? `openMinioLogModal('${bucket}', '${obj.key}')` 
+                        : `loadMinioFileContent('${bucket}', '${obj.key}')`;
                     
                     tr.innerHTML = `
                         <td style="padding:8px 12px; font-family:'JetBrains Mono', monospace; font-size:11px; word-break:break-all; color:#e2e8f0;">${obj.key}</td>
                         <td style="padding:8px 12px; color:var(--text-muted);">${formatSize(obj.size)}</td>
                         <td style="padding:8px 12px; color:var(--text-muted); font-size:11px;">${new Date(obj.last_modified).toLocaleString()}</td>
                         <td style="padding:8px 12px; text-align:center;">
-                            <button class="btn" onclick="loadMinioFileContent('${bucket}', '${obj.key}')" style="margin:0; padding:2px 8px; font-size:10px; border-color:rgba(168,85,247,0.4); color:#c084fc; height:20px; justify-content:center;">Load File</button>
+                            <button class="btn" onclick="${buttonClickAction}" style="margin:0; padding:2px 8px; font-size:10px; border-color:rgba(168,85,247,0.4); color:#c084fc; height:20px; justify-content:center;">${buttonLabel}</button>
                         </td>
                     `;
                     tbody.appendChild(tr);
@@ -4402,6 +4498,171 @@
                 statusDiv.style.color = "var(--color-rose)";
             }
         }
+
+        async function openMinioLogModal(bucket, key) {
+            document.getElementById("minio-log-modal").style.display = "flex";
+            const bodyDiv = document.getElementById("minio-log-modal-body");
+            bodyDiv.innerHTML = '<div style="text-align:center; padding:50px; color:var(--text-muted);">Loading log details...</div>';
+            
+            const downloadBtn = document.getElementById("minio-log-download-btn");
+            downloadBtn.onclick = () => {
+                window.open(`/api/minio/object/content?bucket=${encodeURIComponent(bucket)}&key=${encodeURIComponent(key)}`, '_blank');
+            };
+
+            try {
+                const resp = await fetch(`/api/minio/object/content?bucket=${encodeURIComponent(bucket)}&key=${encodeURIComponent(key)}`);
+                if (!resp.ok) throw new Error("Failed to load audit log content");
+                const payload = await resp.json();
+                const formatTime = (ts) => ts ? new Date(ts).toLocaleString() : "N/A";
+                
+                bodyDiv.innerHTML = `
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                        <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 8px;">
+                            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;">Security Decision Metadata</div>
+                            <div style="display: flex; flex-direction: column; gap: 6px; font-size: 13px;">
+                                <div style="display:flex; justify-content:space-between;"><span>Transaction ID:</span><strong style="font-family:monospace; color:#fff;">${payload.transaction_id || "N/A"}</strong></div>
+                                <div style="display:flex; justify-content:space-between;"><span>Session ID:</span><strong style="font-family:monospace; color:#fff;">${payload.session_id || "N/A"}</strong></div>
+                                <div style="display:flex; justify-content:space-between;"><span>Client IP:</span><strong style="color:#fff;">${payload.client_ip || "N/A"}</strong></div>
+                                <div style="display:flex; justify-content:space-between;"><span>Claimed Key:</span><strong style="font-family:monospace; color:#fff;">${payload.claimed_key || "N/A"}</strong></div>
+                                <div style="display:flex; justify-content:space-between;"><span>Timestamp:</span><strong style="color:#fff;">${formatTime(payload.timestamp)}</strong></div>
+                            </div>
+                        </div>
+                        <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 8px;">
+                            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;">Active Inference Telemetry</div>
+                            <div style="display: flex; flex-direction: column; gap: 6px; font-size: 13px;">
+                                <div style="display:flex; justify-content:space-between;">
+                                    <span>Decision:</span>
+                                    <span style="background:${payload.is_blocked ? 'rgba(244,63,94,0.15)' : 'rgba(16,185,129,0.15)'}; border:1px solid ${payload.is_blocked ? 'var(--color-rose)' : 'var(--color-emerald)'}; color:${payload.is_blocked ? 'var(--color-rose)' : 'var(--color-emerald)'}; padding: 2px 8px; border-radius:4px; font-size:11px; font-weight:700;">
+                                        ${payload.is_blocked ? "BLOCKED" : "ALLOWED/MONITORED"}
+                                    </span>
+                                </div>
+                                <div style="display:flex; justify-content:space-between;"><span>Observation Code:</span><strong style="color:var(--color-cyan);">${payload.observation !== undefined ? payload.observation : "N/A"}</strong></div>
+                                <div style="display:flex; justify-content:space-between;"><span>Layer 1 Syntactic VFE:</span><strong style="color:#fff;">${payload.vfe_score_l1 !== undefined ? payload.vfe_score_l1.toFixed(4) : "N/A"}</strong></div>
+                                <div style="display:flex; justify-content:space-between;"><span>Layer 2 Surprise VFE:</span><strong style="color:#fff;">${payload.vfe_score !== undefined ? payload.vfe_score.toFixed(4) : "N/A"}</strong></div>
+                                <div style="display:flex; justify-content:space-between;"><span>Layer 3 Surprise VFE:</span><strong style="color:#fff;">${payload.vfe_score_l3 !== undefined ? payload.vfe_score_l3.toFixed(4) : "N/A"}</strong></div>
+                            </div>
+                        </div>
+                    </div>
+ 
+                    <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 8px;">
+                        <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; display: flex; justify-content: space-between; align-items: center;">
+                            <span>Raw Request Body (Intercepted Prompt)</span>
+                            <span onclick="toggleModalCollapse('request-body-collapse')" style="cursor:pointer; color:var(--color-cyan); font-size:11px;">Toggle Collapse</span>
+                        </div>
+                        <pre id="request-body-collapse" style="background: #090d16; border: 1px solid var(--border-color); border-radius: 6px; padding: 10px; overflow: auto; max-height: 200px; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #94a3b8; margin: 0;">${JSON.stringify(payload.payload, null, 2)}</pre>
+                    </div>
+ 
+                    <div style="font-size:12px; color:var(--text-muted); background:rgba(0,0,0,0.15); padding:8px 12px; border-radius:6px; border:1px solid rgba(255,255,255,0.02);">
+                        <strong>Client User-Agent:</strong> ${payload.user_agent || "N/A"}
+                    </div>
+                `;
+            } catch(e) {
+                bodyDiv.innerHTML = `<div style="text-align:center; padding:50px; color:var(--color-rose);">Failed to parse compliance log: ${e.message}</div>`;
+            }
+        }
+
+        function closeMinioLogModal() {
+            document.getElementById("minio-log-modal").style.display = "none";
+        }
+
+        function toggleModalCollapse(id) {
+            const el = document.getElementById(id);
+            if (el.style.display === "none") {
+                el.style.display = "block";
+            } else {
+                el.style.display = "none";
+            }
+        }
+
+        let complianceLogsList = [];
+        let complianceCurrentPage = 0;
+        const compliancePageSize = 15;
+
+        async function loadComplianceS3Logs(direction = 0) {
+            const tbody = document.getElementById("compliance-tbody");
+            const prevBtn = document.getElementById("compliance-prev-btn");
+            const nextBtn = document.getElementById("compliance-next-btn");
+            const pagingInfo = document.getElementById("compliance-paging-info");
+            
+            const dateInput = document.getElementById("compliance-date-filter");
+            if (!dateInput.value) {
+                const today = new Date().toISOString().split('T')[0];
+                dateInput.value = today;
+            }
+            const selectedDate = dateInput.value;
+
+            if (direction === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:40px; color:var(--text-muted);">Fetching datalake logs from S3...</td></tr>';
+                complianceCurrentPage = 0;
+                complianceLogsList = [];
+                prevBtn.disabled = true;
+                nextBtn.disabled = true;
+                
+                try {
+                    const prefix = `audit/${selectedDate}/`;
+                    const resp = await fetch(`/api/minio/objects?bucket=compliance-audit-logs&prefix=${encodeURIComponent(prefix)}&limit=1000`);
+                    if (!resp.ok) throw new Error("Failed to load logs from S3");
+                    complianceLogsList = await resp.json();
+                } catch (e) {
+                    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; padding:40px; color:var(--color-rose);">Failed to load datalake: ${e.message}</td></tr>`;
+                    pagingInfo.textContent = "Error loading datalake files";
+                    return;
+                }
+            } else {
+                complianceCurrentPage += direction;
+            }
+
+            tbody.innerHTML = '';
+            if (complianceLogsList.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:40px; color:var(--text-muted);">No compliance logs recorded on this date.</td></tr>';
+                pagingInfo.textContent = `0 logs found for ${selectedDate}`;
+                prevBtn.disabled = true;
+                nextBtn.disabled = true;
+                return;
+            }
+
+            const startIdx = complianceCurrentPage * compliancePageSize;
+            const endIdx = Math.min(startIdx + compliancePageSize, complianceLogsList.length);
+            const pageItems = complianceLogsList.slice(startIdx, endIdx);
+
+            const formatSize = (bytes) => {
+                if (bytes === 0) return "0 B";
+                const k = 1024;
+                const sizes = ["B", "KB", "MB"];
+                const i = Math.floor(Math.log(bytes) / Math.log(k));
+                return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+            };
+
+            pageItems.forEach(item => {
+                const tr = document.createElement("tr");
+                tr.style.borderBottom = "1px solid rgba(255,255,255,0.02)";
+                
+                const parts = item.key.split('/');
+                const filename = parts[parts.length - 1];
+                const isBlocked = filename.startsWith("blocked_");
+                const displayFilename = isBlocked ? filename.substring("blocked_".length) : filename;
+
+                const badgeHtml = isBlocked 
+                    ? `<span style="background:rgba(244,63,94,0.15); border:1px solid var(--color-rose); color:var(--color-rose); padding:2px 8px; border-radius:4px; font-size:10px; font-weight:700;">BLOCKED</span>`
+                    : `<span style="background:rgba(16,185,129,0.15); border:1px solid var(--color-emerald); color:var(--color-emerald); padding:2px 8px; border-radius:4px; font-size:10px; font-weight:700;">ALLOWED</span>`;
+
+                tr.innerHTML = `
+                    <td style="padding:10px 16px; font-family:'JetBrains Mono', monospace; font-size:11px; word-break:break-all; color:#e2e8f0;">${displayFilename}</td>
+                    <td style="padding:10px 16px;">${badgeHtml}</td>
+                    <td style="padding:10px 16px; color:var(--text-muted);">${formatSize(item.size)}</td>
+                    <td style="padding:10px 16px; color:var(--text-muted); font-size:11px;">${new Date(item.last_modified).toLocaleString()}</td>
+                    <td style="padding:10px 16px; text-align:center;">
+                        <button class="btn" onclick="openMinioLogModal('compliance-audit-logs', '${item.key}')" style="margin:0; padding:3px 10px; font-size:10px; border-color:rgba(6, 182, 212, 0.4); color:var(--color-cyan); height:22px; justify-content:center;">View Log</button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+
+            pagingInfo.textContent = `Showing ${startIdx + 1}-${endIdx} of ${complianceLogsList.length} logs for ${selectedDate}`;
+            prevBtn.disabled = complianceCurrentPage === 0;
+            nextBtn.disabled = endIdx >= complianceLogsList.length;
+        }
+
     </script>
 
     <!-- Forensics Drilldown Modal -->
@@ -4413,6 +4674,26 @@
             </div>
             <div style="padding: 20px; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 16px;" id="forensics-modal-body">
                 <!-- Drilldown details -->
+            </div>
+        </div>
+    </div>
+
+    <!-- MinIO/S3 Compliance Log Viewer Modal -->
+    <div id="minio-log-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 10001; align-items: center; justify-content: center; backdrop-filter: blur(8px);">
+        <div style="background: #0f172a; border: 1px solid var(--border-color); width: 85%; max-width: 950px; height: 85%; max-height: 700px; border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 10px 25px rgba(0,0,0,0.5);">
+            <div style="padding: 16px; background: rgba(20, 24, 33, 0.7); border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;">
+                <span style="font-weight: 700; font-size: 15px; color: var(--color-cyan); display: flex; align-items: center; gap: 8px;">
+                    <svg style="width:16px; height:16px; fill:currentColor;" viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
+                    S3 Compliance Log Inspection
+                </span>
+                <button onclick="closeMinioLogModal()" style="background: none; border: none; color: var(--text-muted); font-size: 20px; cursor: pointer; line-height: 1;">&times;</button>
+            </div>
+            <div style="padding: 20px; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 20px;" id="minio-log-modal-body">
+                <!-- Content will be injected dynamically -->
+            </div>
+            <div style="padding: 12px 20px; background: rgba(15, 23, 42, 0.9); border-top: 1px solid var(--border-color); display: flex; justify-content: flex-end; gap: 12px;">
+                <button class="btn" id="minio-log-download-btn" style="margin:0; border-color: rgba(6, 182, 212, 0.4); color: var(--color-cyan);">Download JSON</button>
+                <button class="btn btn-secondary" onclick="closeMinioLogModal()" style="margin:0;">Close</button>
             </div>
         </div>
     </div>

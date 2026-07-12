@@ -58,3 +58,36 @@ CREATE TABLE IF NOT EXISTS siem_config (
     is_active BOOLEAN DEFAULT FALSE
 );
 
+-- Model Pricing Index (Live rates per 1M tokens)
+CREATE TABLE IF NOT EXISTS model_pricing (
+    model_name VARCHAR(255) PRIMARY KEY,
+    provider VARCHAR(50) NOT NULL,
+    input_price_per_million NUMERIC(10, 4) NOT NULL,
+    output_price_per_million NUMERIC(10, 4) NOT NULL,
+    cached_input_price_per_million NUMERIC(10, 4) NOT NULL,
+    reasoning_price_per_million NUMERIC(10, 4) NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Token Cost Ledger for user/dept attribution
+CREATE TABLE IF NOT EXISTS token_cost_ledger (
+    transaction_id UUID PRIMARY KEY,
+    session_id UUID NOT NULL,
+    model_name VARCHAR(255) NOT NULL,
+    virtual_api_key VARCHAR(255) DEFAULT 'default_key',
+    department VARCHAR(255) DEFAULT 'unassigned',
+    end_user_id VARCHAR(255) DEFAULT 'anonymous',
+    prompt_tokens INT DEFAULT 0,
+    completion_tokens INT DEFAULT 0,
+    cached_prompt_tokens INT DEFAULT 0,
+    reasoning_tokens INT DEFAULT 0,
+    calculated_cost NUMERIC(15, 6) DEFAULT 0.0,
+    timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_cost_ledger_dept ON token_cost_ledger (department);
+CREATE INDEX IF NOT EXISTS idx_cost_ledger_user ON token_cost_ledger (end_user_id);
+CREATE INDEX IF NOT EXISTS idx_cost_ledger_key ON token_cost_ledger (virtual_api_key);
+CREATE INDEX IF NOT EXISTS idx_cost_ledger_timestamp ON token_cost_ledger (timestamp);
+
+

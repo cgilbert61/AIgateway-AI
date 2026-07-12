@@ -25,9 +25,10 @@ const (
 
 // Layer 1 Action Constants
 const (
-	ACTION_ALLOW   = 0
-	ACTION_MONITOR = 1
-	ACTION_BLOCK   = 2
+	ACTION_ALLOW    = 0
+	ACTION_MONITOR  = 1
+	ACTION_BLOCK    = 2
+	ACTION_REDACTED = 3
 )
 
 // ActiveInfState holds the running parameters and history of a single session
@@ -63,6 +64,14 @@ type ActiveInfState struct {
 	B1           [][][]float64 `json:"b1"`
 	HistoryL1VFE []float64     `json:"history_l1_vfe"`
 	HistoryL3VFE []float64     `json:"history_l3_vfe"`
+	ProcessedHistoryHash string `json:"processed_messages_hash"`
+	LongTermAnomalyDensity float64 `json:"long_term_anomaly_density"`
+	LastAnomalyTime time.Time `json:"last_anomaly_time"`
+	LastProcessedText string `json:"last_processed_text"`
+	LastProcessedTextTime time.Time `json:"last_processed_text_time"`
+	IsAgent bool `json:"is_agent"`
+	IsLastRequestPII bool `json:"-"`
+	IsDuplicateRequest bool `json:"-"`
 }
 
 type PayloadDetail struct {
@@ -96,23 +105,24 @@ func NewActiveInfState(rawA [][]float64, rawB [][][]float64) *ActiveInfState {
 		{0.05, 0.05, 0.20}, // OBS_L1_CONTROL_CHAR
 	}
 	rawB1 := [][][]float64{
-		// Action 0 (Accept)
+		// Row 0 (Safe next state)
 		{
-			{0.90, 0.15, 0.05},
-			{0.08, 0.80, 0.15},
-			{0.02, 0.05, 0.80},
+			// col 0 (Safe current), col 1 (Suspicious current), col 2 (Malicious current)
+			{0.90, 0.40, 0.10, 0.99}, // ALLOW, MONITOR, BLOCK, REDACTED
+			{0.15, 0.10, 0.05, 0.99},
+			{0.05, 0.05, 0.02, 0.99},
 		},
-		// Action 1 (Buffer)
+		// Row 1 (Suspicious next state)
 		{
-			{0.40, 0.10, 0.05},
-			{0.55, 0.85, 0.25},
-			{0.05, 0.05, 0.70},
+			{0.08, 0.55, 0.10, 0.01},
+			{0.80, 0.85, 0.15, 0.01},
+			{0.15, 0.25, 0.08, 0.01},
 		},
-		// Action 2 (Drop)
+		// Row 2 (Malicious next state)
 		{
-			{0.10, 0.05, 0.02},
-			{0.10, 0.15, 0.08},
-			{0.80, 0.80, 0.90},
+			{0.02, 0.05, 0.80, 0.0},
+			{0.05, 0.05, 0.80, 0.0},
+			{0.80, 0.70, 0.90, 0.0},
 		},
 	}
 
@@ -173,11 +183,11 @@ func normalizeB(rawB [][][]float64) [][][]float64 {
 	for i := range B {
 		B[i] = make([][]float64, 3)
 		for j := range B[i] {
-			B[i][j] = make([]float64, 3)
+			B[i][j] = make([]float64, 4)
 		}
 	}
 
-	for action := 0; action < 3; action++ {
+	for action := 0; action < 4; action++ {
 		for col := 0; col < 3; col++ {
 			sum := 0.0
 			for row := 0; row < 3; row++ {
@@ -207,14 +217,21 @@ func (s *ActiveInfState) UpdatePerception(prevAction *int, observation int) ([]f
 	}
 	if !s.LastRequestTime.IsZero() {
 		elapsed := time.Since(s.LastRequestTime).Seconds()
-		decay := 1.0 - math.Exp(-elapsed*GatewayConfig.L2DecayRate)
+		decayRate := GatewayConfig.L2DecayRate
+		if s.IsAgent {
+			decayRate = 2.0 // Agent Channel uses homeostatic tracking (lambda = 2.0, rapid decay)
+		}
+		decay := 1.0 - math.Exp(-elapsed*decayRate)
 		for i := 0; i < 3; i++ {
 			s.PriorBeliefs[i] = (1.0-decay)*s.PriorBeliefs[i] + decay*baseline[i]
 		}
 		// Decay the cumulative LeakyVFE
-		s.LeakyVFE = s.LeakyVFE * math.Exp(-elapsed*GatewayConfig.L2DecayRate)
+		s.LeakyVFE = s.LeakyVFE * math.Exp(-elapsed*decayRate)
+		// Decay long-term anomaly density over a 24-hour scale (lambda = 0.00001 per second)
+		s.LongTermAnomalyDensity = s.LongTermAnomalyDensity * math.Exp(-elapsed*0.00001)
 	}
 	s.LastRequestTime = time.Now()
+
 
 	// 1. Calculate prior beliefs over current state
 	priorQS := make([]float64, 3)
@@ -273,7 +290,36 @@ func (s *ActiveInfState) UpdatePerception(prevAction *int, observation int) ([]f
 	s.HistoryBeliefs = append(s.HistoryBeliefs, qs)
 	s.HistoryObs = append(s.HistoryObs, observation)
 	s.HistoryVFE = append(s.HistoryVFE, vfe)
-	s.LeakyVFE += vfe
+	
+	// Apply dynamic surprise precision weight based on historical anomaly density
+	precisionWeight := 1.0 + s.LongTermAnomalyDensity
+	surpriseImpact := vfe
+	if s.IsDuplicateRequest && observation == 2 && s.IsLastRequestPII {
+		surpriseImpact = 0.0
+	} else if s.IsLastRequestPII {
+		surpriseImpact = 2.0
+	}
+	s.LeakyVFE += surpriseImpact * precisionWeight
+
+	// Apply mitigation credit if this PII leak was successfully mitigated/redacted on the previous step
+	if !(s.IsDuplicateRequest && observation == 2 && s.IsLastRequestPII) && s.IsLastRequestPII && prevAction != nil && (*prevAction == ACTION_ALLOW || *prevAction == ACTION_MONITOR || *prevAction == ACTION_REDACTED) {
+		s.LeakyVFE -= 3.0
+		if s.LeakyVFE < 0.0 {
+			s.LeakyVFE = 0.0
+		}
+	}
+
+	// Track long-term anomaly occurrences (OBS_STRUCTURE_SHIFT (1) or OBS_INPUT_ERROR (2))
+	if !(s.IsDuplicateRequest && (observation == 1 || observation == 2) && s.IsLastRequestPII) && (observation == 1 || observation == 2) {
+		s.LongTermAnomalyDensity += 1.0
+		s.LastAnomalyTime = time.Now()
+		
+		// Action-Conditioned Precision Reset: damp anomaly density by 60% if the previous action redacted/allowed the PII
+		if s.IsLastRequestPII && prevAction != nil && (*prevAction == ACTION_ALLOW || *prevAction == ACTION_MONITOR || *prevAction == ACTION_REDACTED) {
+			s.LongTermAnomalyDensity = s.LongTermAnomalyDensity * 0.40
+		}
+	}
+
 	s.PruneHistory()
 	return qs, vfe
 }
@@ -446,11 +492,11 @@ func normalizeB1(rawB [][][]float64) [][][]float64 {
 	for i := range B {
 		B[i] = make([][]float64, 3)
 		for j := range B[i] {
-			B[i][j] = make([]float64, 3)
+			B[i][j] = make([]float64, 4)
 		}
 	}
 
-	for action := 0; action < 3; action++ {
+	for action := 0; action < 4; action++ {
 		for col := 0; col < 3; col++ {
 			sum := 0.0
 			for row := 0; row < 3; row++ {

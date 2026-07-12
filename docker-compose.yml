@@ -55,6 +55,7 @@ services:
       - ./config:/app/config
       - ./gateway/policies:/app/policies
       - ./gateway/dashboard:/app/dashboard
+      - ./data:/app/data
     ports:
       - "1173:1173"
       - "1163:1163"
@@ -149,10 +150,7 @@ services:
       - "9000:9000"
       - "9001:9001"
     volumes:
-      - type: tmpfs
-        target: /data
-        tmpfs:
-          size: 256M
+      - minio_data:/data
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 5s
@@ -163,3 +161,20 @@ services:
         limits:
           cpus: '1.0'
           memory: 512MB
+
+  # =========================================================================
+  # 7. Microsoft Presidio NLP Sidecar (DLP Context-Aware PII Detection)
+  # =========================================================================
+  aiaiai_dlp_sidecar:
+    image: mcr.microsoft.com/presidio-analyzer:latest
+    container_name: aiaiai_dlp_sidecar
+    ports:
+      - "5002:5001"
+    environment:
+      - PORT=5001
+      - ANALYZER_MODEL_PROVIDER=spacy
+      - ANALYZER_MODEL_NAME=en_core_web_sm
+    restart: unless-stopped
+
+volumes:
+  minio_data:

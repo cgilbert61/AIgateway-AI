@@ -1,0 +1,855 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enterprise AI Cost Governance & Token Metering</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #0d0f14;
+            --panel-bg: rgba(20, 24, 33, 0.75);
+            --border-color: rgba(255, 255, 255, 0.05);
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --color-allow: #10b981;
+            --color-monitor: #f59e0b;
+            --color-block: #ef4444;
+            --color-cyan: #06b6d4;
+            --color-magenta: #d946ef;
+            --color-gold: #fbbf24;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            min-height: 100vh;
+            overflow-y: auto;
+            position: relative;
+        }
+
+        body::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image: radial-gradient(rgba(255, 255, 255, 0.01) 1px, transparent 1px);
+            background-size: 24px 24px;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 24px;
+            background: rgba(13, 15, 20, 0.85);
+            border-bottom: 1px solid var(--border-color);
+            z-index: 10;
+            position: sticky;
+            top: 0;
+        }
+
+        .header-title-container {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .logo-glow {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background-color: #10b981;
+            box-shadow: 0 0 12px #10b981;
+            animation: pulse-glow 2s infinite ease-in-out;
+        }
+
+        @keyframes pulse-glow {
+            0%, 100% { transform: scale(1); opacity: 0.7; box-shadow: 0 0 8px #10b981; }
+            50% { transform: scale(1.2); opacity: 1; box-shadow: 0 0 16px #10b981; }
+        }
+
+        h1 {
+            font-size: 20px;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+            background: linear-gradient(135deg, #ffffff 0%, #cbd5e1 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .header-meta {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            border-radius: 20px;
+            background: rgba(16, 185, 129, 0.1);
+            color: #34d399;
+            font-weight: 600;
+            border: 1px solid rgba(16, 185, 129, 0.2);
+            font-size: 13px;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: #10b981;
+        }
+
+        .btn {
+            background: rgba(30, 41, 59, 0.3);
+            border: 1px solid var(--border-color);
+            color: var(--text-main);
+            padding: 6px 14px;
+            font-family: inherit;
+            font-size: 12px;
+            font-weight: 600;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            text-decoration: none;
+            outline: none;
+        }
+
+        .btn:hover {
+            background: rgba(30, 41, 59, 0.6);
+            border-color: rgba(255, 255, 255, 0.15);
+            transform: translateY(-1px);
+        }
+
+        .btn-cyan {
+            border-color: var(--color-cyan);
+            color: var(--color-cyan);
+        }
+        .btn-cyan:hover {
+            background: rgba(6, 182, 212, 0.1);
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        main {
+            padding: 24px;
+            max-width: 1400px;
+            margin: 0 auto;
+            z-index: 5;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .kpi-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+        }
+
+        .kpi-card {
+            background: var(--panel-bg);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 16px;
+            text-align: center;
+        }
+
+        .kpi-label {
+            font-size: 12px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .kpi-val {
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--color-cyan);
+            margin-top: 6px;
+        }
+
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        .glass-panel {
+            background: var(--panel-bg);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            padding-bottom: 8px;
+        }
+
+        .panel-title {
+            font-size: 13px;
+            font-weight: 700;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        th {
+            text-align: left;
+            padding: 8px 12px;
+            font-weight: 600;
+            color: var(--text-muted);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        td {
+            padding: 10px 12px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.02);
+        }
+
+        .interactive-row {
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .interactive-row:hover {
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        .drilldown-panel {
+            background: rgba(6, 182, 212, 0.05);
+            border: 1px solid rgba(6, 182, 212, 0.2);
+            border-radius: 6px;
+            padding: 12px;
+            margin-bottom: 16px;
+            font-size: 12px;
+            display: none;
+        }
+
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(8px);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .modal-card {
+            background: rgb(20, 24, 33);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            width: 440px;
+            padding: 24px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+        }
+
+        .form-group {
+            margin-bottom: 14px;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-bottom: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .form-control {
+            width: 100%;
+            background: rgba(0,0,0,0.3);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 4px;
+            padding: 8px 12px;
+            color: #fff;
+            font-family: inherit;
+            font-size: 13px;
+        }
+        .form-control:focus {
+            outline: none;
+            border-color: var(--color-cyan);
+        }
+
+        .ledger-controls {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+
+        .select-control {
+            background: rgba(0,0,0,0.3);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 4px;
+            padding: 4px 8px;
+            color: #fff;
+            font-size: 12px;
+            outline: none;
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="header-title-container">
+            <div class="logo-glow"></div>
+            <h1>Enterprise AI Cost Governance & Token Metering</h1>
+        </div>
+        <div class="header-meta">
+            <div class="status-badge">
+                <div class="status-dot"></div>
+                <span>COSTING TELEMETRY</span>
+            </div>
+            <a href="/" id="dashboard-link" class="btn btn-cyan">
+                <span>📊 Return to Dashboard</span>
+            </a>
+            <a href="/quarantine.html" class="btn" style="border-color: var(--color-gold); color: var(--color-gold);">
+                <span>⚠️ Quarantine Workspace</span>
+            </a>
+            <a href="#" id="config-link" class="btn" style="border-color: var(--color-magenta); color: var(--color-magenta);">
+                <span>⚙️ Configure System</span>
+            </a>
+        </div>
+    </header>
+
+    <main>
+        <!-- KPI Row -->
+        <div class="kpi-grid">
+            <div class="kpi-card">
+                <div class="kpi-label">Total Net Cost</div>
+                <div id="costing-kpi-total-cost" class="kpi-val">$0.000000</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-label">Total Cached Savings</div>
+                <div id="costing-kpi-total-savings" class="kpi-val" style="color:#10b981;">$0.000000</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-label">Inquiries Tracked</div>
+                <div id="costing-kpi-total-requests" class="kpi-val" style="color:var(--color-gold);">0</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-label">Configured Models</div>
+                <div id="costing-kpi-active-models" class="kpi-val" style="color:#a855f7;">0</div>
+            </div>
+        </div>
+
+        <!-- Upper Row: Departments & Keys -->
+        <div class="dashboard-grid">
+            <!-- Department Spend -->
+            <div class="glass-panel">
+                <div class="panel-header">
+                    <div class="panel-title">Spend by Department / Cost Center</div>
+                </div>
+                
+                <!-- Department Drilldown Overlay -->
+                <div id="costing-dept-drilldown" class="drilldown-panel">
+                    <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(6,182,212,0.2); padding-bottom:6px; margin-bottom:8px;">
+                        <span id="costing-dept-drilldown-title" style="font-weight:700; color:var(--color-cyan)">Department Drilldown</span>
+                        <button onclick="closeDeptDrilldown()" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-weight:700;">&times;</button>
+                    </div>
+                    <div id="costing-dept-drilldown-content"></div>
+                </div>
+
+                <div style="max-height: 250px; overflow-y: auto;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Department</th>
+                                <th>Requests</th>
+                                <th style="text-align: right;">Cached Savings</th>
+                                <th style="text-align: right;">Net Cost</th>
+                            </tr>
+                        </thead>
+                        <tbody id="costing-dept-tbody">
+                            <tr><td colspan="4" style="text-align: center; color: var(--text-muted)">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- API Key Spend -->
+            <div class="glass-panel">
+                <div class="panel-header">
+                    <div class="panel-title">Spend by Virtual API Key</div>
+                </div>
+
+                <!-- Key Drilldown Overlay -->
+                <div id="costing-key-drilldown" class="drilldown-panel" style="background: rgba(168,85,247,0.05); border-color: rgba(168,85,247,0.2);">
+                    <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(168,85,247,0.2); padding-bottom:6px; margin-bottom:8px;">
+                        <span id="costing-key-drilldown-title" style="font-weight:700; color:#c084fc">Key Drilldown</span>
+                        <button onclick="closeKeyDrilldown()" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-weight:700;">&times;</button>
+                    </div>
+                    <div id="costing-key-drilldown-content"></div>
+                </div>
+
+                <div style="max-height: 250px; overflow-y: auto;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Virtual API Key</th>
+                                <th>Requests</th>
+                                <th style="text-align: right;">Cached Savings</th>
+                                <th style="text-align: right;">Net Cost</th>
+                            </tr>
+                        </thead>
+                        <tbody id="costing-key-tbody">
+                            <tr><td colspan="4" style="text-align: center; color: var(--text-muted)">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Middle Row: Users & Pricing Index -->
+        <div class="dashboard-grid">
+            <!-- User Spend -->
+            <div class="glass-panel">
+                <div class="panel-header">
+                    <div class="panel-title">Individual End-User Spend</div>
+                </div>
+                <div style="max-height: 250px; overflow-y: auto;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>User ID</th>
+                                <th>Requests</th>
+                                <th style="text-align: right;">Cached Savings</th>
+                                <th style="text-align: right;">Net Cost</th>
+                            </tr>
+                        </thead>
+                        <tbody id="costing-user-tbody">
+                            <tr><td colspan="4" style="text-align: center; color: var(--text-muted)">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Model Pricing Index -->
+            <div class="glass-panel">
+                <div class="panel-header">
+                    <div class="panel-title">Model Pricing Index (Per Million Tokens)</div>
+                    <button class="btn btn-cyan" onclick="openAddPricingModal()" style="font-size: 11px; padding: 4px 8px; margin: 0;">+ Add/Update Model Rates</button>
+                </div>
+                <div style="max-height: 250px; overflow-y: auto;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Model Name</th>
+                                <th>Provider</th>
+                                <th style="text-align: right;">Input Rate</th>
+                                <th style="text-align: right; color:#10b981;">Cached Rate</th>
+                                <th style="text-align: right;">Output Rate</th>
+                                <th style="text-align: right; color:#a855f7;">Reasoning Rate</th>
+                            </tr>
+                        </thead>
+                        <tbody id="costing-pricing-tbody">
+                            <tr><td colspan="6" style="text-align: center; color: var(--text-muted)">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Lower Section: Transaction Ledger -->
+        <div class="glass-panel">
+            <div class="panel-header">
+                <div class="panel-title">Token Metering Transaction Ledger</div>
+                <div class="ledger-controls">
+                    <label style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;">Sort by</label>
+                    <select id="costing-ledger-sort" onchange="fetchCostingLedger()" class="select-control">
+                        <option value="timestamp">Timestamp</option>
+                        <option value="calculated_cost">Net Cost</option>
+                        <option value="prompt_tokens">Prompt Tokens</option>
+                        <option value="completion_tokens">Completion Tokens</option>
+                    </select>
+                    <select id="costing-ledger-order" onchange="fetchCostingLedger()" class="select-control">
+                        <option value="desc">Desc</option>
+                        <option value="asc">Asc</option>
+                    </select>
+                    <button onclick="fetchCostingLedger()" class="btn btn-secondary" style="height: 24px; padding: 2px 8px; font-size: 11px;">🔄 Refresh</button>
+                </div>
+            </div>
+            <div style="max-height: 400px; overflow-y: auto;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Model</th>
+                            <th>Department</th>
+                            <th>User ID</th>
+                            <th style="text-align: right;">Input Prompt</th>
+                            <th style="text-align: right;">Output Completion</th>
+                            <th style="text-align: right;">Calculated Cost</th>
+                        </tr>
+                    </thead>
+                    <tbody id="costing-ledger-tbody">
+                        <tr><td colspan="7" style="text-align: center; color: var(--text-muted)">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+
+    <!-- Modal for Adding/Updating Pricing Rates -->
+    <div id="add-pricing-modal" class="modal-overlay">
+        <div class="modal-card">
+            <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.08); padding-bottom:10px; margin-bottom:18px;">
+                <span style="font-weight:700; font-size:15px; color:var(--color-cyan)">Add or Update Model Pricing Rates</span>
+                <button onclick="closeAddPricingModal()" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:18px;">&times;</button>
+            </div>
+            <form onsubmit="submitPricingRate(event)">
+                <div class="form-group">
+                    <label>Model Name</label>
+                    <input type="text" id="pricing-model-name" required placeholder="e.g. gpt-4o-mini" class="form-control">
+                </div>
+                <div class="form-group">
+                    <label>Provider</label>
+                    <select id="pricing-provider" class="form-control">
+                        <option value="openai">OpenAI</option>
+                        <option value="anthropic">Anthropic</option>
+                        <option value="gemini">Gemini</option>
+                        <option value="mock">Mock</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Input Prompt Rate (per million tokens)</label>
+                    <input type="number" step="0.0001" id="pricing-input-rate" required placeholder="e.g. 5.00" class="form-control">
+                </div>
+                <div class="form-group">
+                    <label>Cached Prompt Discount Rate (per million tokens)</label>
+                    <input type="number" step="0.0001" id="pricing-cached-rate" required placeholder="e.g. 2.50" class="form-control">
+                </div>
+                <div class="form-group">
+                    <label>Output Completion Rate (per million tokens)</label>
+                    <input type="number" step="0.0001" id="pricing-output-rate" required placeholder="e.g. 15.00" class="form-control">
+                </div>
+                <div class="form-group">
+                    <label>Reasoning Rate (per million tokens)</label>
+                    <input type="number" step="0.0001" id="pricing-reasoning-rate" required placeholder="e.g. 15.00" class="form-control">
+                </div>
+                <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px;">
+                    <button type="button" onclick="closeAddPricingModal()" class="btn btn-secondary">Cancel</button>
+                    <button type="submit" class="btn btn-cyan">Save Rate Structure</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        let ledgerCostData = [];
+
+        // Set up dynamic configuration URL
+        document.getElementById("config-link").href = window.location.protocol + "//" + window.location.hostname + ":1163/";
+
+        async function loadCostingData() {
+            await fetchCostingSummary();
+            await fetchCostingPricingIndex();
+            await fetchCostingLedger();
+        }
+
+        async function fetchCostingSummary() {
+            try {
+                const r = await fetch("/api/costing/summary");
+                if (!r.ok) return;
+                const data = await r.json();
+
+                // Populate KPIs
+                document.getElementById("costing-kpi-total-cost").innerText = `$${data.total_cost.toFixed(6)}`;
+                document.getElementById("costing-kpi-total-savings").innerText = `$${data.total_savings.toFixed(6)}`;
+                
+                let totalReqs = 0;
+                data.departments.forEach(d => totalReqs += d.total_requests);
+                document.getElementById("costing-kpi-total-requests").innerText = totalReqs;
+
+                // Populate Departments
+                const deptTbody = document.getElementById("costing-dept-tbody");
+                if (data.departments.length === 0) {
+                    deptTbody.innerHTML = `<tr><td colspan="4" style="padding: 10px; text-align: center; color: var(--text-muted)">No departments tracked yet</td></tr>`;
+                } else {
+                    deptTbody.innerHTML = data.departments.map(d => `
+                        <tr class="interactive-row" onclick="showDeptDrilldown('${d.group_key}')">
+                            <td style="padding: 8px 12px; font-weight:600; color:var(--color-cyan);">${d.group_key}</td>
+                            <td style="padding: 8px 12px;">${d.total_requests}</td>
+                            <td style="padding: 8px 12px; text-align: right; color:#10b981;">$${d.group_savings.toFixed(6)}</td>
+                            <td style="padding: 8px 12px; text-align: right; font-weight:600;">$${d.group_cost.toFixed(6)}</td>
+                        </tr>
+                    `).join("");
+                }
+
+                // Populate Keys
+                const keyTbody = document.getElementById("costing-key-tbody");
+                if (data.keys.length === 0) {
+                    keyTbody.innerHTML = `<tr><td colspan="4" style="padding: 10px; text-align: center; color: var(--text-muted)">No API Keys tracked yet</td></tr>`;
+                } else {
+                    keyTbody.innerHTML = data.keys.map(k => `
+                        <tr class="interactive-row" onclick="showKeyDrilldown('${k.group_key}')">
+                            <td style="padding: 8px 12px; font-weight:600; color:#c084fc;">${k.group_key}</td>
+                            <td style="padding: 8px 12px;">${k.total_requests}</td>
+                            <td style="padding: 8px 12px; text-align: right; color:#10b981;">$${k.group_savings.toFixed(6)}</td>
+                            <td style="padding: 8px 12px; text-align: right; font-weight:600;">$${k.group_cost.toFixed(6)}</td>
+                        </tr>
+                    `).join("");
+                }
+
+                // Populate Users
+                const userTbody = document.getElementById("costing-user-tbody");
+                if (data.users.length === 0) {
+                    userTbody.innerHTML = `<tr><td colspan="4" style="padding: 10px; text-align: center; color: var(--text-muted)">No users tracked yet</td></tr>`;
+                } else {
+                    userTbody.innerHTML = data.users.map(u => `
+                        <tr>
+                            <td style="padding: 8px 12px; font-weight:600; color:var(--color-gold);">${u.group_key}</td>
+                            <td style="padding: 8px 12px;">${u.total_requests}</td>
+                            <td style="padding: 8px 12px; text-align: right; color:#10b981;">$${u.group_savings.toFixed(6)}</td>
+                            <td style="padding: 8px 12px; text-align: right; font-weight:600;">$${u.group_cost.toFixed(6)}</td>
+                        </tr>
+                    `).join("");
+                }
+            } catch(e) {
+                console.error("Summary fetch error", e);
+            }
+        }
+
+        async function fetchCostingPricingIndex() {
+            try {
+                const r = await fetch("/api/costing/pricing-index");
+                if (!r.ok) return;
+                const data = await r.json();
+
+                document.getElementById("costing-kpi-active-models").innerText = data.length;
+
+                const pricingTbody = document.getElementById("costing-pricing-tbody");
+                if (data.length === 0) {
+                    pricingTbody.innerHTML = `<tr><td colspan="6" style="padding: 10px; text-align: center; color: var(--text-muted)">No model pricing seeded</td></tr>`;
+                } else {
+                    pricingTbody.innerHTML = data.map(m => `
+                        <tr>
+                            <td style="padding: 8px 12px; font-weight:600; color:#fff;">${m.model_name}</td>
+                            <td style="padding: 8px 12px; color:var(--text-muted);">${m.provider}</td>
+                            <td style="padding: 8px 12px; text-align: right;">$${m.input_price_per_million.toFixed(4)}</td>
+                            <td style="padding: 8px 12px; text-align: right; color:#10b981;">$${m.cached_input_price_per_million.toFixed(4)}</td>
+                            <td style="padding: 8px 12px; text-align: right;">$${m.output_price_per_million.toFixed(4)}</td>
+                            <td style="padding: 8px 12px; text-align: right; color:#a855f7;">$${m.reasoning_price_per_million.toFixed(4)}</td>
+                        </tr>
+                    `).join("");
+                }
+            } catch(e) {
+                console.error("Pricing index fetch error", e);
+            }
+        }
+
+        async function fetchCostingLedger() {
+            try {
+                const sortBy = document.getElementById("costing-ledger-sort").value;
+                const order = document.getElementById("costing-ledger-order").value;
+                const r = await fetch(`/api/costing/transactions?sort_by=${sortBy}&order=${order}&limit=100`);
+                if (!r.ok) return;
+                const data = await r.json();
+                ledgerCostData = data;
+
+                const ledgerTbody = document.getElementById("costing-ledger-tbody");
+                if (data.length === 0) {
+                    ledgerTbody.innerHTML = `<tr><td colspan="7" style="padding: 10px; text-align: center; color: var(--text-muted)">No transactions tracked yet</td></tr>`;
+                } else {
+                    ledgerTbody.innerHTML = data.map(t => {
+                        const dateStr = new Date(t.timestamp).toLocaleTimeString();
+                        return `
+                            <tr>
+                                <td style="padding: 8px 12px; color:var(--text-muted);">${dateStr}</td>
+                                <td style="padding: 8px 12px; color:#fff;">${t.model_name}</td>
+                                <td style="padding: 8px 12px; color:var(--color-cyan);">${t.department}</td>
+                                <td style="padding: 8px 12px; color:var(--color-gold);">${t.end_user_id}</td>
+                                <td style="padding: 8px 12px; text-align: right;">
+                                    ${t.prompt_tokens}
+                                    ${t.cached_prompt_tokens > 0 ? `<br/><span style="color:#10b981; font-size:9px;">(${t.cached_prompt_tokens} cached)</span>` : ""}
+                                </td>
+                                <td style="padding: 8px 12px; text-align: right;">
+                                    ${t.completion_tokens}
+                                    ${t.reasoning_tokens > 0 ? `<br/><span style="color:#a855f7; font-size:9px;">(${t.reasoning_tokens} reasoning)</span>` : ""}
+                                </td>
+                                <td style="padding: 8px 12px; text-align: right; font-weight:600;">$${t.calculated_cost.toFixed(6)}</td>
+                            </tr>
+                        `;
+                    }).join("");
+                }
+            } catch(e) {
+                console.error("Ledger fetch error", e);
+            }
+        }
+
+        function showDeptDrilldown(dept) {
+            const deptTx = ledgerCostData.filter(t => t.department === dept);
+            const userSpend = {};
+            const modelSpend = {};
+            deptTx.forEach(t => {
+                userSpend[t.end_user_id] = (userSpend[t.end_user_id] || 0) + t.calculated_cost;
+                modelSpend[t.model_name] = (modelSpend[t.model_name] || 0) + t.calculated_cost;
+            });
+            
+            let html = '<div style="margin-bottom: 6px; font-weight:600; color: var(--color-gold);">User Attribution:</div>';
+            const sortedUsers = Object.entries(userSpend).sort((a,b) => b[1]-a[1]);
+            if (sortedUsers.length === 0) {
+                html += '<div style="color: var(--text-muted)">No recent transactions recorded for drilldown. Try clicking after generating some traffic.</div>';
+            } else {
+                sortedUsers.forEach(([user, spend]) => {
+                    html += `<div style="padding-left: 8px;">&bull; User <b>${user}</b>: $${spend.toFixed(6)}</div>`;
+                });
+            }
+            
+            html += '<div style="margin-top: 8px; margin-bottom: 4px; font-weight:600; color: var(--color-cyan);">Model Utilization:</div>';
+            const sortedModels = Object.entries(modelSpend).sort((a,b) => b[1]-a[1]);
+            sortedModels.forEach(([model, spend]) => {
+                html += `<div style="padding-left: 8px;">&bull; Model <b>${model}</b>: $${spend.toFixed(6)}</div>`;
+            });
+            
+            document.getElementById("costing-dept-drilldown-title").innerText = `Department Drilldown: ${dept}`;
+            document.getElementById("costing-dept-drilldown-content").innerHTML = html;
+            document.getElementById("costing-dept-drilldown").style.display = "block";
+        }
+
+        function closeDeptDrilldown() {
+            document.getElementById("costing-dept-drilldown").style.display = "none";
+        }
+
+        function showKeyDrilldown(key) {
+            const keyTx = ledgerCostData.filter(t => t.virtual_api_key === key);
+            const deptSpend = {};
+            const userSpend = {};
+            keyTx.forEach(t => {
+                deptSpend[t.department] = (deptSpend[t.department] || 0) + t.calculated_cost;
+                userSpend[t.end_user_id] = (userSpend[t.end_user_id] || 0) + t.calculated_cost;
+            });
+            
+            let html = '<div style="margin-bottom: 6px; font-weight:600; color: var(--color-cyan);">Department Spend:</div>';
+            const sortedDepts = Object.entries(deptSpend).sort((a,b) => b[1]-a[1]);
+            if (sortedDepts.length === 0) {
+                html += '<div style="color: var(--text-muted)">No recent transactions recorded for drilldown. Try clicking after generating some traffic.</div>';
+            } else {
+                sortedDepts.forEach(([dept, spend]) => {
+                    html += `<div style="padding-left: 8px;">&bull; Dept <b>${dept}</b>: $${spend.toFixed(6)}</div>`;
+                });
+            }
+            
+            html += '<div style="margin-top: 8px; margin-bottom: 4px; font-weight:600; color: var(--color-gold);">User Spend:</div>';
+            const sortedUsers = Object.entries(userSpend).sort((a,b) => b[1]-a[1]);
+            sortedUsers.forEach(([user, spend]) => {
+                html += `<div style="padding-left: 8px;">&bull; User <b>${user}</b>: $${spend.toFixed(6)}</div>`;
+            });
+            
+            document.getElementById("costing-key-drilldown-title").innerText = `Key Drilldown: ${key}`;
+            document.getElementById("costing-key-drilldown-content").innerHTML = html;
+            document.getElementById("costing-key-drilldown").style.display = "block";
+        }
+
+        function closeKeyDrilldown() {
+            document.getElementById("costing-key-drilldown").style.display = "none";
+        }
+
+        function openAddPricingModal() {
+            document.getElementById("pricing-model-name").value = "";
+            document.getElementById("pricing-input-rate").value = "";
+            document.getElementById("pricing-cached-rate").value = "";
+            document.getElementById("pricing-output-rate").value = "";
+            document.getElementById("pricing-reasoning-rate").value = "";
+            document.getElementById("add-pricing-modal").style.display = "flex";
+        }
+
+        function closeAddPricingModal() {
+            document.getElementById("add-pricing-modal").style.display = "none";
+        }
+
+        async function submitPricingRate(event) {
+            event.preventDefault();
+            const modelName = document.getElementById("pricing-model-name").value;
+            const provider = document.getElementById("pricing-provider").value;
+            const inputRate = parseFloat(document.getElementById("pricing-input-rate").value);
+            const cachedRate = parseFloat(document.getElementById("pricing-cached-rate").value);
+            const outputRate = parseFloat(document.getElementById("pricing-output-rate").value);
+            const reasoningRate = parseFloat(document.getElementById("pricing-reasoning-rate").value);
+
+            try {
+                const response = await fetch("/api/costing/pricing-index", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        model_name: modelName,
+                        provider: provider,
+                        input_price_per_million: inputRate,
+                        cached_input_price_per_million: cachedRate,
+                        output_price_per_million: outputRate,
+                        reasoning_price_per_million: reasoningRate
+                    })
+                });
+
+                if (response.ok) {
+                    closeAddPricingModal();
+                    await fetchCostingPricingIndex();
+                } else {
+                    alert("Failed to save pricing rates");
+                }
+            } catch(e) {
+                console.error("Save pricing error", e);
+                alert("Error connecting to server");
+            }
+        }
+
+        // Auto Load on Startup & Set Interval
+        window.addEventListener("load", () => {
+            loadCostingData();
+            setInterval(loadCostingData, 4000);
+        });
+    </script>
+</body>
+</html>
